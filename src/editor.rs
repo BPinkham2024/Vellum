@@ -161,7 +161,6 @@ impl Editor {
     // Simplifying cursor movement, takes in key code and translates to movement
     fn move_cursor(&mut self, key: KeyCode) {
         let Position { mut x, mut y } = self.cursor_position;
-        let size = self.terminal.size();
         // The limit is the number of rows in the document
         let height = self.document.len();
 
