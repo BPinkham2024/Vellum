@@ -1,4 +1,5 @@
 use crate::terminal::Terminal;
+use crate::document::Document;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 // Cursor coordinates, non-negative
@@ -13,6 +14,7 @@ pub struct Editor {
     should_quit: bool,
     terminal: Terminal,
     cursor_position: Position,
+    document: Document,
 }
 
 impl Editor {
@@ -22,6 +24,7 @@ impl Editor {
             should_quit: false,
             terminal: Terminal::default().expect("Failed to initialize terminal"),
             cursor_position: Position { x: 0, y: 0 },
+            document: Document::default(),
         }
     }
 
@@ -53,11 +56,39 @@ impl Editor {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => self.should_quit = true,
+
+            // TYPING: Handle Enter
+            KeyEvent { code: KeyCode::Enter, .. } => {
+                self.document.insert(&self.cursor_position, '\n');
+                self.cursor_position.y += 1;
+                self.cursor_position.x = 0;
+            }
+
+            // TYPING: Handle Character insertion
+            KeyEvent { code: KeyCode::Char(c), .. } => {
+                self.document.insert(&self.cursor_position, c);
+                self.cursor_position.x += 1;
+            }
+
+            // TYPING: Handle Backspace
+            KeyEvent { code: KeyCode::Backspace, .. } => {
+                if self.cursor_position.x > 0 || self.cursor_position.y > 0 {
+                    if self.cursor_position.x > 0 {
+                        self.cursor_position.x -= 1;
+                        self.document.delete(&self.cursor_position);
+                    } else {
+                        // Moving back a line (complex logic simplified for now)
+                        let previous_row_len = self.document.row(self.cursor_position.y - 1).unwrap().len();
+                        self.cursor_position.y -= 1;
+                        self.cursor_position.x = previous_row_len;
+                        self.document.delete(&self.cursor_position);
+                    }
+                }
+            }
             
             // Delegate movement logic
             KeyEvent {
-                code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right 
-                | KeyCode::Char('w') | KeyCode::Char('a') | KeyCode::Char('s') | KeyCode::Char('d'),
+                code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right,
                 ..
             } => self.move_cursor(pressed_key.code),
             
@@ -116,21 +147,25 @@ impl Editor {
         self.terminal.flush()
     }
 
-    // Draws '~' for empty lines, thank you Vim
+    // Draws each row
     fn draw_rows(&mut self) {
         let height = self.terminal.size().height;
         
-        for i in 0..height {
+        for terminal_row in 0..height {
             // Clear the line so old text doesn't linger
             self.terminal.clear_current_line();
             
-            if i == height / 3 {
+            // If the row exists in the document, render it
+            if let Some(row) = self.document.row(terminal_row as usize) {
+                self.terminal.print(&row.render(0, self.terminal.size().width as usize));
+            } else if self.document.is_empty() && terminal_row == height / 3 {
                 self.draw_welcome_message();
             } else {
+                // ~ for empty lines, thank you vim
                 self.terminal.print("~");
             }
-
-            if i < height - 1 {
+            
+            if terminal_row < height - 1 {
                 self.terminal.print("\r\n");
             }
         }

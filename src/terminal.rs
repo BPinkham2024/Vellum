@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::{read, Event, KeyEvent},
+    event::{read, Event, KeyEvent, KeyEventKind},
     queue,
     style::Print,
     terminal::{enable_raw_mode, size, Clear, ClearType},
@@ -36,12 +36,15 @@ impl Terminal {
     pub fn read_key() -> Result<KeyEvent, std::io::Error> {
         loop {
             if let Event::Key(event) = read()? {
-                return Ok(event);
+                // FILTER: Only return the event if it is a keypress, not release
+                if event.kind == KeyEventKind::Press {
+                    return Ok(event);
+                }
             }
         }
     }
 
-    // --- BUFFERED COMMANDS (These don't show up until you call flush) ---
+    // --- BUFFERED COMMANDS (These don't happen until flush is called) ---
 
     pub fn clear_screen(&mut self) {
         queue!(self.stdout, Clear(ClearType::All)).unwrap();
