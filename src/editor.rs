@@ -316,7 +316,7 @@ impl Editor {
 
     fn indent_line(&mut self, count: usize) {
         self.document.indent(self.cursor_position.y, count);
-        self.cursor_position.x += count;
+        self.cursor_position.x += count * 4;
     }
 
 

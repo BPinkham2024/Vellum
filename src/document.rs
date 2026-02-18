@@ -1,5 +1,5 @@
 use crate::row::Row;
-use crate::editor::Position;
+use crate::editor::{self, Editor, Position};
 use std::fs;
 use std::io::{Error, Write};
 
@@ -136,10 +136,12 @@ impl Document {
     // Intending helper
     pub fn indent(&mut self, row_idx: usize, count: usize) {
         if let Some(row) = self.rows.get_mut(row_idx) {
-            let spaces = "\t".repeat(count);
+            let spaces = " ".repeat(count * 4);
             row.string.insert_str(0, &spaces);
+            row.highlight();
         }
         self.dirty = true;
+        
     }
 
 }
