@@ -1,4 +1,4 @@
-use crate::{terminal::Terminal};
+use crate::terminal::Terminal;
 use crate::document::Document;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::Color;
@@ -304,10 +304,26 @@ impl Editor {
         for terminal_row in 0..height  - 2 { // subtracting 2 allows for the status and message bar
             // Clear the line so old text doesn't linger
             self.terminal.clear_current_line();
-            
+                        
             // If the row exists in the document, render it
             if let Some(row) = self.document.row(terminal_row as usize) {
-                self.terminal.print(&row.render(0, self.terminal.size().width as usize));
+
+                let start = 0;
+                let end = self.terminal.size().width as usize;
+                let render_string = row.render(start, end);
+
+                for (i, c) in render_string.chars().enumerate() {
+                    if let Some(hl_type) = row.highlighting.get(i) {
+                        let color = hl_type.to_color();
+                        self.terminal.set_fg_color(color);
+                    } else {
+                        self.terminal.set_fg_color(Color::Reset);
+                    }
+
+                    self.terminal.print(&c.to_string());
+                }
+
+                self.terminal.reset_colors();
             } else if self.document.is_empty() && terminal_row == height / 3 {
                 self.draw_welcome_message();
             } else {
