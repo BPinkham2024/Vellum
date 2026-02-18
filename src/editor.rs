@@ -13,6 +13,12 @@ pub struct Position {
     pub y: usize,
 }
 
+#[derive(PartialEq)]
+enum Mode {
+    Normal,
+    Command(String), //Holds the command being typed
+}
+
 // Main state of the editor
 // keeps track of terminal size and where user is looking
 pub struct Editor {
@@ -20,7 +26,8 @@ pub struct Editor {
     terminal: Terminal,
     cursor_position: Position,
     document: Document,
-    status_message: StatusMessage
+    status_message: StatusMessage,
+    mode: Mode
 }
 
 struct StatusMessage {
@@ -63,6 +70,7 @@ impl Editor {
             cursor_position: Position { x: 0, y: 0 },
             document,
             status_message: StatusMessage::from(initial_status),
+            mode: Mode::Normal,
         }
     }
 
@@ -87,15 +95,31 @@ impl Editor {
     // Reads a single key event and updates state
     fn process_keypress(&mut self) -> Result<(), std::io::Error> {
         let pressed_key = Terminal::read_key()?;
-        match pressed_key {
-            // Quit on Ctrl+Q 
-            KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => self.should_quit = true,
+        
+        match &self.mode {
+            Mode::Normal => self.process_normal_mode(pressed_key),
+            Mode::Command(_) => self.process_command_mode(pressed_key),
+        }
+    }
 
-            // Save with Ctrl+S
+    fn process_normal_mode(&mut self, key: KeyEvent) -> Result<(), std::io::Error> {
+        match key {
+
+            // Enter command mode
+            KeyEvent { code: KeyCode::Char(':'), modifiers: KeyModifiers::CONTROL, .. } | 
+            KeyEvent { code: KeyCode::Char(';'), modifiers: KeyModifiers::CONTROL, .. } => {
+                self.mode = Mode::Command(String::new());
+                self.status_message = StatusMessage::from("Command: ".to_string());
+            }
+
+            // Quit on Ctrl+Q 
+            // KeyEvent {
+            //     code: KeyCode::Char('q'),
+            //     modifiers: KeyModifiers::CONTROL,
+            //     ..
+            // } => self.should_quit = true,
+
+            // Save with Ctrl+S (keeping for now, not 100% sure w and !w work as I want yet)
             KeyEvent {
                 code: KeyCode::Char('s'),
                 modifiers: KeyModifiers::CONTROL,
@@ -151,12 +175,150 @@ impl Editor {
             KeyEvent {
                 code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right,
                 ..
-            } => self.move_cursor(pressed_key.code),
+            } => self.move_cursor(key.code),
             
             _ => (),
         }
         Ok(())
     }
+
+    fn process_command_mode(&mut self, key: KeyEvent) -> Result<(), std::io::Error> {
+        let mut command = if let Mode::Command(s) = &self.mode { s.clone() } else { String::new() };
+
+        match key {
+            // Execute command
+            KeyEvent { code: KeyCode::Enter, .. } => {
+                let _ = self.execute_command(&command);
+                self.mode = Mode::Normal;
+                self.status_message = StatusMessage::from(String::new());
+            }
+            // Cancel command
+            KeyEvent { code: KeyCode::Esc, .. } => {
+                self.mode = Mode::Normal;
+                self.status_message = StatusMessage::from(String::new());
+            }
+            // Edit command string
+            KeyEvent { code: KeyCode::Backspace, .. } => {
+                command.pop();
+                self.mode = Mode::Command(command);
+            }
+            KeyEvent { code: KeyCode::Char(c), .. } => {
+                command.push(c);
+                self.mode = Mode::Command(command);
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn execute_command(&mut self, command: &str) -> Result<(), std::io::Error> {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() { return Ok(());}
+
+        match parts[0] {
+            "q" => self.should_quit = true,
+            "w" => {
+                if let Err(e) = self.document.save() {
+                    self.status_message = StatusMessage::from(format!("Error: {}", e));
+                } else {
+                    self.status_message = StatusMessage::from("File saved.".to_string());
+                }
+            },
+            "!w" => {
+                if parts.len() > 1 {
+                    let new_name = parts[1].to_string();
+                    self.document.filename = Some(new_name);
+                    self.document.save()?;
+                    self.status_message = StatusMessage::from("File saved as new name.".to_string());
+                } else {
+                    self.status_message = StatusMessage::from("Error: !w requires a filename".to_string());
+                }
+            },
+            "head" => {
+                if parts.len() > 1 {
+                    if let Ok(level) = parts[1].parse::<usize>() {
+                        self.document.set_header(self.cursor_position.y, level);
+                    }
+                }
+            },
+            "bold" => self.wrap_word("**"),
+            "italic" => self.wrap_word("*"),
+            "t" => {
+                if parts.len() > 1 {
+                    if let Ok(count) = parts[1].parse::<usize>() {
+                        self.indent_line(count);
+                    }
+                }
+            },
+            "find" => {
+                if parts.len() > 1 {
+                    let query = parts[1];
+                    self.find_next(query);
+                }
+            }
+            _ => self.status_message = StatusMessage::from(format!("Unknown command: {}", command)),
+        }
+        Ok(())
+    }
+
+    // Wrap word for bold and italics
+    fn wrap_word(&mut self, wrapper: &str) {
+        let y = self.cursor_position.y;
+        let x = self.cursor_position.x;
+
+        if let Some(row) = self.document.row(y) {
+            let line = &row.string;
+
+            // Find start of word
+            let start = line[..x].rfind(' ').map(|i| i + 1).unwrap_or(0);
+            
+            // Find end of word
+            let end = line[x..].find(' ').map(|i| x + i).unwrap_or(line.len());
+
+            // Since we are mutating the line, document needs to be called
+            self.document.insert_at(y, end, wrapper); // Suffex first so we don't mess with indices for prefix insertion
+            self.document.insert_at(y, start, wrapper);
+
+            // Move cursor to end of word
+            self.cursor_position.x = end + (wrapper.len() * 2);
+        }
+    }
+
+    fn find_next(&mut self, query: &str) {
+        let start_y = self.cursor_position.y;
+        let mut y = start_y;
+
+        loop {
+            if let Some(row) = self.document.row(y) {
+                if let Some(x) = row.string.find(query) {
+                    // Check if found after current cursor position only if cursor on y = stary_y
+                    if y != start_y || x > self.cursor_position.x {
+                        self.cursor_position.x = x;
+                        self.cursor_position.y = y;
+                        self.status_message = StatusMessage::from(format!("Found: {}", query));
+                        return;
+                    }
+                }
+            }
+
+            y += 1;
+            // Wrap to top if hitting bottom
+            if y >= self.document.len() {
+                y = 0;
+            }
+            // If word not found in full wrapping of doc, stop
+            if y == start_y {
+                self.status_message = StatusMessage::from(format!("Not found: {}", query));
+                return;
+            }
+        }
+    }
+
+    fn indent_line(&mut self, count: usize) {
+        self.document.indent(self.cursor_position.y, count);
+        self.cursor_position.x += count;
+    }
+
 
     // Simplifying cursor movement, takes in key code and translates to movement
     fn move_cursor(&mut self, key: KeyCode) {
@@ -304,7 +466,7 @@ impl Editor {
         for terminal_row in 0..height  - 2 { // subtracting 2 allows for the status and message bar
             // Clear the line so old text doesn't linger
             self.terminal.clear_current_line();
-                        
+
             // If the row exists in the document, render it
             if let Some(row) = self.document.row(terminal_row as usize) {
 
@@ -358,19 +520,25 @@ impl Editor {
         let mut status;
         let width = self.terminal.size().width as usize;
 
-        let modified_indicator = if self.document.is_dirty() { "(modified)" } else { "" };
-        
-        let mut filename = "[No Name]".to_string();
-        if let Some(name) = &self.document.filename {
-            filename = name.clone();
-            // truncation if name too long
-            if filename.len() > 20 {
-                filename.truncate(20);
-                filename.push_str("...");
+        if let Mode::Command(cmd) = &self.mode {
+            status = format!("Command: {}", cmd);
+        } else {
+            let modified_indicator = if self.document.is_dirty() { "(modified)" } else { "" };
+            
+            let mut filename = "[No Name]".to_string();
+            if let Some(name) = &self.document.filename {
+                filename = name.clone();
+                // truncation if name too long
+                if filename.len() > 20 {
+                    filename.truncate(20);
+                    filename.push_str("...");
+                }
             }
+
+            status = format!("{} - {} lines {}", filename, self.document.len(), modified_indicator);
         }
 
-        status = format!("{} - {} lines {}", filename, self.document.len(), modified_indicator);
+        
 
         let line_indicator = format!("{}/{}", self.cursor_position.y + 1, self.document.len());
 

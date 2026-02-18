@@ -83,6 +83,13 @@ impl Document {
         }
     }
 
+    pub fn insert_at(&mut self, y: usize, x: usize, text: &str) {
+        if let Some(row) = self.rows.get_mut(y) {
+            row.insert_str(x, text);
+            self.dirty = true;
+        }
+    }
+
     pub fn delete(&mut self, at: &Position) {
         let len = self.len();
         if at.y >= len {
@@ -113,4 +120,26 @@ impl Document {
             self.rows.insert(at.y + 1, new_row);
         }
     }
+
+    // Header helper
+    pub fn set_header(&mut self, row_idx: usize, level: usize) {
+        if let Some(row) = self.rows.get_mut(row_idx) {
+            // Remove existing headings
+            let content = row.string.trim_start_matches('#').trim_start();
+            let hashes = "#".repeat(level);
+            row.string = format!("{} {}", hashes, content);
+            row.highlight();
+        }
+        self.dirty = true;
+    }
+
+    // Intending helper
+    pub fn indent(&mut self, row_idx: usize, count: usize) {
+        if let Some(row) = self.rows.get_mut(row_idx) {
+            let spaces = "\t".repeat(count);
+            row.string.insert_str(0, &spaces);
+        }
+        self.dirty = true;
+    }
+
 }

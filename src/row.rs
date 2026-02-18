@@ -2,7 +2,7 @@ use std::cmp;
 use crate::highlighting::Type;
 
 pub struct Row {
-    string: String,
+    pub(crate) string: String,
     pub highlighting: Vec<Type>,
 }
 
@@ -26,6 +26,16 @@ impl Row {
 
     pub fn len(&self) -> usize {
         self.string.len()
+    }
+
+    pub fn insert_str(&mut self, at: usize, text: &str) {
+        if at >= self.len() {
+            self.string.push_str(text);
+        } else {
+            self.string.insert_str(at, text);
+        }
+
+        self.highlight();
     }
 
     pub fn insert(&mut self, at: usize, c: char) {
