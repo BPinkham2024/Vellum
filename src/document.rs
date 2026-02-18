@@ -38,13 +38,14 @@ impl Document {
         })
     }
 
-    pub fn save(&self) -> Result<(), Error> {
+    pub fn save(&mut self) -> Result<(), Error> {
         if let Some(filename) = &self.filename {
             let mut file = fs::File::create(filename)?;
             for row in &self.rows {
                 file.write_all(row.as_bytes())?;
                 file.write_all(b"\n")?;
             }
+            self.dirty = false;
         }
         Ok(())
     }
@@ -65,6 +66,7 @@ impl Document {
         if at.y > self.len() {
             return;
         }
+        self.dirty = true;
         
         if c == '\n' {
             self.insert_newline(at);
@@ -86,6 +88,7 @@ impl Document {
         if at.y >= len {
             return;
         }
+        self.dirty = true;
 
         if at.x == self.rows.get(at.y).unwrap().len() && at.y < len - 1 {
             let next_row = self.rows.remove(at.y + 1);
