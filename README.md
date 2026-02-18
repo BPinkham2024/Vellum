@@ -21,7 +21,7 @@ You must have [Rust and Cargo](https://rustup.rs/) installed.
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/BPinkham2024/vellum.git](https://github.com/BPinkham2024/vellum.git)
+    git clone https://github.com/BPinkham2024/vellum.git
     cd vellum
     ```
 
