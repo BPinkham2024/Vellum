@@ -46,7 +46,6 @@ impl Row {
     }
 
     pub fn split(&mut self, at: usize) -> Row {
-        let mut row: String = String::new();
         let length = self.string.len();
         
         // Safety check to make sure there is no splitting past the end of the string

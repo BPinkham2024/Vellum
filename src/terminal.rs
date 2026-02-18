@@ -2,7 +2,7 @@ use crossterm::{
     cursor,
     event::{read, Event, KeyEvent, KeyEventKind},
     queue,
-    style::Print,
+    style::{Print, Color, SetBackgroundColor, SetForegroundColor},
     terminal::{enable_raw_mode, size, Clear, ClearType},
 };
 use std::io::{self, stdout, Write};
@@ -69,6 +69,19 @@ impl Terminal {
     // using queue! + Print instead of println!
     pub fn print(&mut self, string: &str) {
         queue!(self.stdout, Print(string)).unwrap();
+    }
+
+    pub fn set_bg_color(&mut self, color: Color) {
+        queue!(self.stdout, SetBackgroundColor(color)).unwrap();
+    }
+
+    pub fn set_fg_color(&mut self, color: Color) {
+        queue!(self.stdout, SetForegroundColor(color)).unwrap();
+    }
+
+    pub fn reset_colors(&mut self) {
+        queue!(self.stdout, SetForegroundColor(Color::Reset)).unwrap();
+        queue!(self.stdout, SetBackgroundColor(Color::Reset)).unwrap();
     }
 
     // Send all queued changes to the screen at once

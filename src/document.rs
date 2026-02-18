@@ -1,16 +1,52 @@
 use crate::row::Row;
 use crate::editor::Position;
+use std::fs;
+use std::io::{Error, Write};
 
 #[derive(Default)]
 pub struct Document {
     rows: Vec<Row>,
+    pub filename: Option<String>,
+    dirty: bool,
 }
 
 impl Document {
     pub fn default() -> Self {
         Self {
             rows: Vec::new(),
+            filename: None,
+            dirty: false,
         }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn open(filename: &str) -> Result<Self, std::io::Error> {
+        let contents = fs::read_to_string(filename)?;
+        let mut rows = Vec::new();
+
+        for value in contents.lines() {
+            rows.push(Row::from(value));
+        }
+
+        Ok(Self {
+            rows,
+            filename: Some(filename.to_string()),
+            dirty: false
+        })
+    }
+
+    pub fn save(&self) -> Result<(), Error> {
+        if let Some(filename) = &self.filename {
+            let mut file = fs::File::create(filename)?;
+            for row in &self.rows {
+                file.write_all(row.as_bytes())?;
+                file.write_all(b"\n")?;
+            }
+        }
+        Ok(())
     }
 
     pub fn row(&self, index: usize) -> Option<&Row> {

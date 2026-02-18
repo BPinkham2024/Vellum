@@ -1,6 +1,11 @@
 use crate::{terminal::Terminal};
 use crate::document::Document;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::style::Color;
+use std::{
+    env,
+    time::{Duration, Instant}
+};
 
 // Cursor coordinates, non-negative
 pub struct Position {
@@ -15,16 +20,49 @@ pub struct Editor {
     terminal: Terminal,
     cursor_position: Position,
     document: Document,
+    status_message: StatusMessage
+}
+
+struct StatusMessage {
+    text: String,
+    time: Instant,
+}
+
+impl StatusMessage {
+    fn from(message: String) -> Self {
+        Self {
+            time: Instant::now(),
+            text:message,
+        }
+    }
 }
 
 impl Editor {
     // Initialize the editor with default values
     pub fn default() -> Self {
+
+        let args: Vec<String> = env::args().collect();
+        let mut initial_status = String::from("HELP: Ctrl+S = save | Ctrl+Q = quit");
+
+        let document = if args.len() > 1 {
+            let filename = &args[1];
+            let doc = Document::open(filename);
+            if let Ok(doc) = doc {
+                doc
+            } else {
+                initial_status = format!("ERR: Could not open file: {}", filename);
+                Document::default()
+            }
+        } else {
+            Document::default()
+        };
+
         Self {
             should_quit: false,
             terminal: Terminal::default().expect("Failed to initialize terminal"),
             cursor_position: Position { x: 0, y: 0 },
-            document: Document::default(),
+            document,
+            status_message: StatusMessage::from(initial_status),
         }
     }
 
@@ -56,6 +94,29 @@ impl Editor {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => self.should_quit = true,
+
+            // Save with Ctrl+S
+            KeyEvent {
+                code: KeyCode::Char('s'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                if self.document.filename.is_none() {
+                    let new_name = self.prompt("Save as: ")?;
+                    if let Some(name) = new_name {
+                        self.document.filename = Some(name);
+                    } else {
+                        self.status_message = StatusMessage::from("Save aborted.".to_string());
+                        return Ok(());
+                    }
+                }
+                
+                if self.document.save().is_ok() {
+                    self.status_message = StatusMessage::from("File saved successfully.".to_string());
+                } else {
+                    self.status_message = StatusMessage::from("Error writing file!".to_string());
+                }
+            }
 
             // TYPING: Handle Enter
             KeyEvent { code: KeyCode::Enter, .. } => {
@@ -184,6 +245,8 @@ impl Editor {
             self.terminal.print("Goodbye.\r\n");
         } else {
             self.draw_rows();
+            self.draw_status_bar();
+            self.draw_message_bar();
             
             // 4. Put the cursor back where it belongs
             self.terminal.cursor_position(
@@ -199,11 +262,47 @@ impl Editor {
         self.terminal.flush()
     }
 
+
+    // "Save As" implementation (roughly)
+    fn prompt(&mut self, prompt: &str) -> Result<Option<String>, std::io::Error> {
+        let mut result = String::new();
+
+        loop {
+            self.status_message = StatusMessage::from(format!("{}{}", prompt, result));
+            self.refresh_screen()?;
+
+            match Terminal::read_key()? {
+                KeyEvent {code: KeyCode::Backspace, .. } => {
+                    if !result.is_empty() {
+                        result.pop();
+                    }
+                }
+                KeyEvent { code: KeyCode::Enter, .. } => {
+                    if result.is_empty() {
+                        return Ok(None);
+                    }
+                    self.status_message = StatusMessage::from(String::new());
+                    return Ok(Some(result));
+                }
+                KeyEvent { code: KeyCode::Char(c), .. } => {
+                    if !c.is_control() {
+                        result.push(c);
+                    }
+                }
+                KeyEvent { code: KeyCode::Esc, .. } => {
+                    self.status_message = StatusMessage::from(String::new());
+                    return Ok(None);
+                }
+                _ => (),
+            }
+        }
+    }
+
     // Draws each row
     fn draw_rows(&mut self) {
         let height = self.terminal.size().height;
         
-        for terminal_row in 0..height {
+        for terminal_row in 0..height  - 2 { // subtracting 2 allows for the status and message bar
             // Clear the line so old text doesn't linger
             self.terminal.clear_current_line();
             
@@ -224,7 +323,11 @@ impl Editor {
     }
 
     fn draw_welcome_message(&mut self) {
-        let mut welcome = format!("Vellum Editor -- Version 0.0.1");
+        let mut welcome = if let Some(name) = &self.document.filename {
+            format!("Editing: {}", name)
+        } else {
+            format!("Vellum Editor -- Version 0.0.1")
+        };
         let width = self.terminal.size().width as usize;
         let len = welcome.len();
         let padding = width.saturating_sub(len) / 2;
@@ -234,6 +337,55 @@ impl Editor {
         welcome.truncate(width);
         
         self.terminal.print(&welcome);
+    }
+
+    fn draw_status_bar(&mut self) {
+        let mut status;
+        let width = self.terminal.size().width as usize;
+
+        let modified_indicator = if self.document.is_dirty() { "(modified)" } else { "" };
+        
+        let mut filename = "[No Name]".to_string();
+        if let Some(name) = &self.document.filename {
+            filename = name.clone();
+            // truncation if name too long
+            if filename.len() > 20 {
+                filename.truncate(20);
+                filename.push_str("...");
+            }
+        }
+
+        status = format!("{} - {} lines {}", filename, self.document.len(), modified_indicator);
+
+        let line_indicator = format!("{}/{}", self.cursor_position.y + 1, self.document.len());
+
+        let len = status.len() + line_indicator.len();
+        if width > len {
+            status.push_str(&" ".repeat(width - len));
+        }
+        status = format!("{}{}", status, line_indicator);
+        status.truncate(width);
+
+        // Styling for status
+        self.terminal.set_bg_color(Color::White);
+        self.terminal.set_fg_color(Color::Black);
+        self.terminal.print(&status);
+
+        // Reset colors
+        self.terminal.reset_colors();
+        self.terminal.print("\r\n");
+
+
+    }
+
+    fn draw_message_bar(&mut self) {
+        self.terminal.clear_current_line();
+        let msg = &self.status_message;
+        if Instant::now() - msg.time < Duration::from_secs(5) {
+            let mut text = msg.text.clone();
+            text.truncate(self.terminal.size().width as usize);
+            self.terminal.print(&text);
+        }
     }
     
     // Updated to match terminal struct
