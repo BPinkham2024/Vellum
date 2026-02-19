@@ -82,7 +82,7 @@ This project follows a modular MVC (Model-View-Controller) architecture:
 
 ## Future Roadmap
 
-* [ ] Search and Replace
+* [+] Search and Replace
 * [ ] Line Number Rendering (Gutter)
 * [ ] Config file support (`.vellumrc`)
 * [ ] Infinite scrolling
