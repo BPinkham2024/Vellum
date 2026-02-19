@@ -30,6 +30,7 @@ pub struct Editor {
     status_message: StatusMessage,
     mode: Mode,
     show_line_numbers: bool,
+    row_offset: usize,
 }
 
 struct StatusMessage {
@@ -74,6 +75,7 @@ impl Editor {
             status_message: StatusMessage::from(initial_status),
             mode: Mode::Normal,
             show_line_numbers: true,
+            row_offset: 0,
         }
     }
 
@@ -397,6 +399,19 @@ impl Editor {
         self.cursor_position.x += count * 4;
     }
 
+    fn scroll(&mut self) {
+        let terminal_height = self.terminal.size().height as usize - 2; // -2 for the status bar
+
+        // Move offset up if cursor goes above visible screen
+        if self.cursor_position.y < self.row_offset {
+            self.row_offset = self.cursor_position.y;
+        }
+        // Move offset down if cursor goes below visible screen
+        else if self.cursor_position.y >= self.row_offset + terminal_height {
+            self.row_offset = self.cursor_position.y - terminal_height + 1;
+        }
+    }
+
 
     // Simplifying cursor movement, takes in key code and translates to movement
     fn move_cursor(&mut self, key: KeyCode) {
@@ -482,6 +497,8 @@ impl Editor {
 
     // Renders the TUI
     fn refresh_screen(&mut self) -> Result<(), std::io::Error> {
+        self.scroll();
+
         // 1. Hide the cursor so it doesn't jump around while being drawn
         self.terminal.cursor_hide();
         
@@ -498,10 +515,12 @@ impl Editor {
             self.draw_message_bar();
             
             // 4. Put the cursor back where it belongs and with offset
-            let offset = self.gutter_width() as u16;
+            let offset_x = self.gutter_width() as u16;
+            let screen_y = (self.cursor_position.y - self.row_offset) as u16;
+
             self.terminal.cursor_position(
-                self.cursor_position.x as u16 + offset, 
-                self.cursor_position.y as u16
+                self.cursor_position.x as u16 + offset_x, 
+                screen_y
             );
         }
 
@@ -558,7 +577,7 @@ impl Editor {
             // Clear the line so old text doesn't linger
             self.terminal.clear_current_line();
 
-            let doc_row = terminal_row as usize;
+            let doc_row = terminal_row as usize + self.row_offset;
 
             // Draw line numbers
             if self.show_line_numbers {
