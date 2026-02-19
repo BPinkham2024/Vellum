@@ -235,6 +235,31 @@ impl Editor {
     }
 
     fn execute_command(&mut self, command: &str) -> Result<(), std::io::Error> {
+
+        // Search and replace logic (vim syntax so all one word not split by whitespace)
+        if command.starts_with("s/") {
+            let parts: Vec<&str> = command.split('/').collect();
+
+            // Expectation is ["s", "old_text", "new_text"]
+            if parts.len() >= 3 {
+                let target = parts[1];
+                let replacement = parts[2];
+
+                let count = self.document.replace(target, replacement);
+                self.status_message = StatusMessage::from(format!("Replaced '{}' in {} lines", target, count));
+
+                // Saftey clamp for cursor (pulls back to end of line)
+                let current_len = self.document.row(self.cursor_position.y).map_or(0, |r| r.len());
+                if self.cursor_position.x > current_len {
+                    self.cursor_position.x = current_len;
+                }
+            } else {
+                self.status_message = StatusMessage::from("Usage: s/old/new".to_string());
+            }
+            return Ok(());
+        }
+
+
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() { return Ok(());}
 

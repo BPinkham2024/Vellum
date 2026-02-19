@@ -1,5 +1,5 @@
 use crate::row::Row;
-use crate::editor::{self, Editor, Position};
+use crate::editor::Position;
 use std::fs;
 use std::io::{Error, Write};
 
@@ -105,6 +105,22 @@ impl Document {
             let row = self.rows.get_mut(at.y).unwrap();
             row.delete(at.x);
         }
+    }
+
+    pub fn replace(&mut self, target: &str, replacement: &str) -> usize {
+        let mut replaced_lines_count = 0;
+
+        for row in self.rows.iter_mut() {
+            if row.replace(target, replacement) {
+                replaced_lines_count += 1;
+            }
+        }
+
+        if replaced_lines_count > 0 {
+            self.dirty = true;
+        }
+
+        replaced_lines_count
     }
 
     fn insert_newline(&mut self, at: &Position) {

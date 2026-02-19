@@ -59,6 +59,15 @@ impl Row {
         self.highlight();
     }
 
+    pub fn replace(&mut self, target: &str, replacement: &str) -> bool {
+        if self.string.contains(target) {
+            self.string = self.string.replace(target, replacement);
+            self.highlight();
+            return true;
+        }
+        false
+    }
+
     pub fn split(&mut self, at: usize) -> Row {
         let length = self.string.len();
         
