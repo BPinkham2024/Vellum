@@ -3,6 +3,8 @@ mod terminal;
 mod row;
 mod document;
 mod highlighting;
+mod ui;
+mod commands;
 
 use editor::Editor;
 

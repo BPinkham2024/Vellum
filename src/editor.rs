@@ -1,10 +1,9 @@
 use crate::terminal::Terminal;
 use crate::document::Document;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::Color;
 use std::{
     env,
-    time::{Duration, Instant}
+    time::Instant
 };
 
 // Cursor coordinates, non-negative
@@ -14,7 +13,7 @@ pub struct Position {
 }
 
 #[derive(PartialEq)]
-enum Mode {
+pub enum Mode {
     Normal,
     Insert,
     Command(String), //Holds the command being typed
@@ -23,23 +22,23 @@ enum Mode {
 // Main state of the editor
 // keeps track of terminal size and where user is looking
 pub struct Editor {
-    should_quit: bool,
-    terminal: Terminal,
-    cursor_position: Position,
-    document: Document,
-    status_message: StatusMessage,
-    mode: Mode,
-    show_line_numbers: bool,
-    row_offset: usize,
+    pub(crate) should_quit: bool,
+    pub(crate) terminal: Terminal,
+    pub(crate) cursor_position: Position,
+    pub(crate) document: Document,
+    pub(crate) status_message: StatusMessage,
+    pub(crate) mode: Mode,
+    pub(crate) show_line_numbers: bool,
+    pub(crate) row_offset: usize,
 }
 
-struct StatusMessage {
-    text: String,
-    time: Instant,
+pub(crate) struct StatusMessage {
+    pub(crate) text: String,
+    pub(crate) time: Instant,
 }
 
 impl StatusMessage {
-    fn from(message: String) -> Self {
+    pub(crate) fn from(message: String) -> Self {
         Self {
             time: Instant::now(),
             text:message,
@@ -85,7 +84,7 @@ impl Editor {
     // 3. Process the keypress
     pub fn run(&mut self) {
         loop {
-            if let Err(e) = self.refresh_screen() {
+            if let Err(e) = crate::ui::refresh_screen(self) {
                 self.die(&e);
             }
             if self.should_quit {
@@ -236,7 +235,8 @@ impl Editor {
         match key {
             // Execute command
             KeyEvent { code: KeyCode::Enter, .. } => {
-                let _ = self.execute_command(&command);
+                crate::commands::execute_command(self, &command)?;
+                
                 self.mode = Mode::Normal;
                 self.status_message = StatusMessage::from(String::new());
             }
@@ -259,147 +259,7 @@ impl Editor {
         Ok(())
     }
 
-    fn execute_command(&mut self, command: &str) -> Result<(), std::io::Error> {
-
-        // I want edits from commands to be able to be reversed/redone
-        self.document.snapshot();
-
-        // Search and replace logic (vim syntax so all one word not split by whitespace)
-        if command.starts_with("s/") {
-            let parts: Vec<&str> = command.split('/').collect();
-
-            // Expectation is ["s", "old_text", "new_text"]
-            if parts.len() >= 3 {
-                let target = parts[1];
-                let replacement = parts[2];
-
-                let count = self.document.replace(target, replacement);
-                self.status_message = StatusMessage::from(format!("Replaced '{}' in {} lines", target, count));
-
-                // Saftey clamp for cursor (pulls back to end of line)
-                let current_len = self.document.row(self.cursor_position.y).map_or(0, |r| r.len());
-                if self.cursor_position.x > current_len {
-                    self.cursor_position.x = current_len;
-                }
-            } else {
-                self.status_message = StatusMessage::from("Usage: s/old/new".to_string());
-            }
-            return Ok(());
-        }
-
-
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.is_empty() { return Ok(());}
-
-        match parts[0] {
-            "q" => self.should_quit = true,
-            "w" => {
-                if let Err(e) = self.document.save() {
-                    self.status_message = StatusMessage::from(format!("Error: {}", e));
-                } else {
-                    self.status_message = StatusMessage::from("File saved.".to_string());
-                }
-            },
-            "!w" => {
-                if parts.len() > 1 {
-                    let new_name = parts[1].to_string();
-                    self.document.filename = Some(new_name);
-                    self.document.save()?;
-                    self.status_message = StatusMessage::from("File saved as new name.".to_string());
-                } else {
-                    self.status_message = StatusMessage::from("Error: !w requires a filename".to_string());
-                }
-            },
-            "head" => {
-                if parts.len() > 1 {
-                    if let Ok(level) = parts[1].parse::<usize>() {
-                        self.document.set_header(self.cursor_position.y, level);
-                    }
-                }
-            },
-            "bold" => self.wrap_word("**"),
-            "italic" => self.wrap_word("*"),
-            "t" => {
-                if parts.len() > 1 {
-                    if let Ok(count) = parts[1].parse::<usize>() {
-                        self.indent_line(count);
-                    }
-                }
-            },
-            "find" => {
-                if parts.len() > 1 {
-                    let query = parts[1];
-                    self.find_next(query);
-                }
-            },
-            "ln" => {
-                self.show_line_numbers = !self.show_line_numbers;
-                self.status_message = StatusMessage::from(format!("Line numbers: {}", self.show_line_numbers));
-            }
-            _ => self.status_message = StatusMessage::from(format!("Unknown command: {}", command)),
-        }
-        Ok(())
-    }
-
-    // Wrap word for bold and italics
-    fn wrap_word(&mut self, wrapper: &str) {
-        let y = self.cursor_position.y;
-        let x = self.cursor_position.x;
-
-        if let Some(row) = self.document.row(y) {
-            let line = &row.string;
-
-            // Find start of word
-            let start = line[..x].rfind(' ').map(|i| i + 1).unwrap_or(0);
-            
-            // Find end of word
-            let end = line[x..].find(' ').map(|i| x + i).unwrap_or(line.len());
-
-            // Since we are mutating the line, document needs to be called
-            self.document.insert_at(y, end, wrapper); // Suffex first so we don't mess with indices for prefix insertion
-            self.document.insert_at(y, start, wrapper);
-
-            // Move cursor to end of word
-            self.cursor_position.x = end + (wrapper.len() * 2);
-        }
-    }
-
-    fn find_next(&mut self, query: &str) {
-        let start_y = self.cursor_position.y;
-        let mut y = start_y;
-
-        loop {
-            if let Some(row) = self.document.row(y) {
-                if let Some(x) = row.string.find(query) {
-                    // Check if found after current cursor position only if cursor on y = stary_y
-                    if y != start_y || x > self.cursor_position.x {
-                        self.cursor_position.x = x;
-                        self.cursor_position.y = y;
-                        self.status_message = StatusMessage::from(format!("Found: {}", query));
-                        return;
-                    }
-                }
-            }
-
-            y += 1;
-            // Wrap to top if hitting bottom
-            if y >= self.document.len() {
-                y = 0;
-            }
-            // If word not found in full wrapping of doc, stop
-            if y == start_y {
-                self.status_message = StatusMessage::from(format!("Not found: {}", query));
-                return;
-            }
-        }
-    }
-
-    fn indent_line(&mut self, count: usize) {
-        self.document.indent(self.cursor_position.y, count);
-        self.cursor_position.x += count * 4;
-    }
-
-    fn scroll(&mut self) {
+    pub fn scroll(&mut self) {
         let terminal_height = self.terminal.size().height as usize - 2; // -2 for the status bar
 
         // Move offset up if cursor goes above visible screen
@@ -485,51 +345,6 @@ impl Editor {
         self.cursor_position = Position { x, y };
     }
 
-    // Helper to calculate gutter width
-    fn gutter_width(&self) -> usize {
-        if !self.show_line_numbers {
-            return 0;
-        }
-
-        // Adds 2 for padding and pipe
-        self.document.len().to_string().len() + 2
-    }
-
-    // Renders the TUI
-    fn refresh_screen(&mut self) -> Result<(), std::io::Error> {
-        self.scroll();
-
-        // 1. Hide the cursor so it doesn't jump around while being drawn
-        self.terminal.cursor_hide();
-        
-        // 2. Move to top-left to start drawing
-        self.terminal.cursor_position(0, 0);
-
-        // 3. Queue up the drawing commands
-        if self.should_quit {
-            self.terminal.clear_screen();
-            self.terminal.print("Goodbye.\r\n");
-        } else {
-            self.draw_rows();
-            self.draw_status_bar();
-            self.draw_message_bar();
-            
-            // 4. Put the cursor back where it belongs and with offset
-            let offset_x = self.gutter_width() as u16;
-            let screen_y = (self.cursor_position.y - self.row_offset) as u16;
-
-            self.terminal.cursor_position(
-                self.cursor_position.x as u16 + offset_x, 
-                screen_y
-            );
-        }
-
-        // 5. Show the cursor again
-        self.terminal.cursor_show();
-        
-        // 6. THE BIG FLUSH
-        self.terminal.flush()
-    }
 
 
     // "Save As" implementation (roughly)
@@ -538,7 +353,7 @@ impl Editor {
 
         loop {
             self.status_message = StatusMessage::from(format!("{}{}", prompt, result));
-            self.refresh_screen()?;
+            crate::ui::refresh_screen(self)?;
 
             match Terminal::read_key()? {
                 KeyEvent {code: KeyCode::Backspace, .. } => {
@@ -567,134 +382,6 @@ impl Editor {
         }
     }
 
-    // Draws each row
-    fn draw_rows(&mut self) {
-        let height = self.terminal.size().height;
-        let width = self.terminal.size().width as usize;
-        let gutter = self.gutter_width();
-        
-        for terminal_row in 0..height  - 2 { // subtracting 2 allows for the status and message bar
-            // Clear the line so old text doesn't linger
-            self.terminal.clear_current_line();
-
-            let doc_row = terminal_row as usize + self.row_offset;
-
-            // Draw line numbers
-            if self.show_line_numbers {
-                self.terminal.set_fg_color(Color::DarkGrey);
-                if doc_row < self.document.len() {
-                    let num_str = format!("{:>w$} |", doc_row + 1, w = gutter - 2);
-                    self.terminal.print(&num_str);
-                } else {
-                    let empty_str = format!("{:>w$} |", "~", w = gutter - 2);
-                    self.terminal.print(&empty_str);
-                }
-                self.terminal.reset_colors();
-            }
-
-            // If the row exists in the document, render it
-            if let Some(row) = self.document.row(doc_row) {
-
-                let start = 0;
-                let end = width.saturating_sub(gutter);
-                let render_string = row.render(start, end);
-
-                for (i, c) in render_string.chars().enumerate() {
-                    if let Some(hl_type) = row.highlighting.get(i) {
-                        let color = hl_type.to_color();
-                        self.terminal.set_fg_color(color);
-                    } else {
-                        self.terminal.set_fg_color(Color::Reset);
-                    }
-
-                    self.terminal.print(&c.to_string());
-                }
-
-                self.terminal.reset_colors();
-            } else if self.document.is_empty() && terminal_row == height / 3 {
-                self.draw_welcome_message();
-            } else if !self.show_line_numbers {
-                // ~ for empty lines, thank you vim
-                self.terminal.print("~");
-            }
-            
-            if terminal_row < height - 1 {
-                self.terminal.print("\r\n");
-            }
-        }
-    }
-
-    fn draw_welcome_message(&mut self) {
-        let mut welcome = if let Some(name) = &self.document.filename {
-            format!("Editing: {}", name)
-        } else {
-            format!("Vellum Editor -- Version 0.0.1")
-        };
-        let width = self.terminal.size().width as usize;
-        let len = welcome.len();
-        let padding = width.saturating_sub(len) / 2;
-        let spaces = " ".repeat(padding);
-        
-        welcome = format!("{}{}", spaces, welcome);
-        welcome.truncate(width);
-        
-        self.terminal.print(&welcome);
-    }
-
-    fn draw_status_bar(&mut self) {
-        let mut status;
-        let width = self.terminal.size().width as usize;
-
-        if let Mode::Command(cmd) = &self.mode {
-            status = format!("Command: {}", cmd);
-        } else {
-            let modified_indicator = if self.document.is_dirty() { "(modified)" } else { "" };
-            
-            let mut filename = "[No Name]".to_string();
-            if let Some(name) = &self.document.filename {
-                filename = name.clone();
-                // truncation if name too long
-                if filename.len() > 20 {
-                    filename.truncate(20);
-                    filename.push_str("...");
-                }
-            }
-
-            status = format!("{} - {} lines {}", filename, self.document.len(), modified_indicator);
-        }
-
-        
-
-        let line_indicator = format!("{}/{}", self.cursor_position.y + 1, self.document.len());
-
-        let len = status.len() + line_indicator.len();
-        if width > len {
-            status.push_str(&" ".repeat(width - len));
-        }
-        status = format!("{}{}", status, line_indicator);
-        status.truncate(width);
-
-        // Styling for status
-        self.terminal.set_bg_color(Color::White);
-        self.terminal.set_fg_color(Color::Black);
-        self.terminal.print(&status);
-
-        // Reset colors
-        self.terminal.reset_colors();
-        self.terminal.print("\r\n");
-
-
-    }
-
-    fn draw_message_bar(&mut self) {
-        self.terminal.clear_current_line();
-        let msg = &self.status_message;
-        if Instant::now() - msg.time < Duration::from_secs(5) {
-            let mut text = msg.text.clone();
-            text.truncate(self.terminal.size().width as usize);
-            self.terminal.print(&text);
-        }
-    }
     
     // Updated to match terminal struct
     fn die(&mut self, e: &std::io::Error) {
