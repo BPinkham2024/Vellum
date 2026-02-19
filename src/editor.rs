@@ -16,6 +16,7 @@ pub struct Position {
 #[derive(PartialEq)]
 enum Mode {
     Normal,
+    Insert,
     Command(String), //Holds the command being typed
 }
 
@@ -49,7 +50,7 @@ impl Editor {
     pub fn default() -> Self {
 
         let args: Vec<String> = env::args().collect();
-        let mut initial_status = String::from("HELP: Ctrl+S = save | Ctrl+Q = quit");
+        let mut initial_status = String::from("Normal Mode - Press 'i' to insert".to_string());
 
         let document = if args.len() > 1 {
             let filename = &args[1];
@@ -98,6 +99,7 @@ impl Editor {
         
         match &self.mode {
             Mode::Normal => self.process_normal_mode(pressed_key),
+            Mode::Insert => self.process_insert_mode(pressed_key),
             Mode::Command(_) => self.process_command_mode(pressed_key),
         }
     }
@@ -105,19 +107,20 @@ impl Editor {
     fn process_normal_mode(&mut self, key: KeyEvent) -> Result<(), std::io::Error> {
         match key {
 
+            // Enter insert mode
+            KeyEvent { code: KeyCode::Char('i'), .. } => {
+                self.mode = Mode::Insert;
+                self.status_message = StatusMessage::from("Insert Mode".to_string());
+            }
+
             // Enter command mode
-            KeyEvent { code: KeyCode::Char(':'), modifiers: KeyModifiers::CONTROL, .. } | 
-            KeyEvent { code: KeyCode::Char(';'), modifiers: KeyModifiers::CONTROL, .. } => {
+            KeyEvent { code: KeyCode::Char(':'), .. } => {
                 self.mode = Mode::Command(String::new());
                 self.status_message = StatusMessage::from("Command: ".to_string());
             }
 
-            // Quit on Ctrl+Q 
-            // KeyEvent {
-            //     code: KeyCode::Char('q'),
-            //     modifiers: KeyModifiers::CONTROL,
-            //     ..
-            // } => self.should_quit = true,
+            // Quick escape on ctrl + q
+            KeyEvent { code: KeyCode::Char('q'), modifiers: KeyModifiers::CONTROL, .. } => self.should_quit = true,
 
             // Save with Ctrl+S (keeping for now, not 100% sure w and !w work as I want yet)
             KeyEvent {
@@ -141,21 +144,42 @@ impl Editor {
                     self.status_message = StatusMessage::from("Error writing file!".to_string());
                 }
             }
+            
+            // Delegate movement logic
+            KeyEvent {
+                code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right,
+                ..
+            } => self.move_cursor(key.code),
+            
+            _ => (),
+        }
+        Ok(())
+    }
 
-            // TYPING: Handle Enter
+    fn process_insert_mode(&mut self, key: KeyEvent) -> Result<(), std::io::Error> {
+        match key {
+
+            // Exit into normal mode
+            KeyEvent { code: KeyCode::Esc, .. } => {
+                self.mode = Mode::Normal;
+                self.status_message = StatusMessage::from("Normal Mode".to_string());
+            }
+
+            // Typing logic (moved from process_normal_mode)
+            // Handle Enter
             KeyEvent { code: KeyCode::Enter, .. } => {
                 self.document.insert(&self.cursor_position, '\n');
                 self.cursor_position.y += 1;
                 self.cursor_position.x = 0;
             }
 
-            // TYPING: Handle Character insertion
+            // Handle Character insertion
             KeyEvent { code: KeyCode::Char(c), .. } => {
                 self.document.insert(&self.cursor_position, c);
                 self.cursor_position.x += 1;
             }
 
-            // TYPING: Handle Backspace
+            // Handle Backspace
             KeyEvent { code: KeyCode::Backspace, .. } => {
                 if self.cursor_position.x > 0 || self.cursor_position.y > 0 {
                     if self.cursor_position.x > 0 {
@@ -171,12 +195,11 @@ impl Editor {
                 }
             }
             
-            // Delegate movement logic
-            KeyEvent {
-                code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right,
-                ..
-            } => self.move_cursor(key.code),
-            
+            // Movement logic
+            KeyEvent { code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right, .. } => {
+                self.move_cursor(key.code);
+            }
+
             _ => (),
         }
         Ok(())
