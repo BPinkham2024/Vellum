@@ -1,6 +1,7 @@
 use std::cmp;
 use crate::highlighting::Type;
 
+#[derive(Clone)]
 pub struct Row {
     pub(crate) string: String,
     pub highlighting: Vec<Type>,

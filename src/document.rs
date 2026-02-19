@@ -8,6 +8,8 @@ pub struct Document {
     rows: Vec<Row>,
     pub filename: Option<String>,
     dirty: bool,
+    undo_stack: Vec<Vec<Row>>, // Past states
+    redo_stack: Vec<Vec<Row>>, // Future states
 }
 
 impl Document {
@@ -16,7 +18,34 @@ impl Document {
             rows: Vec::new(),
             filename: None,
             dirty: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new()
         }
+    }
+
+    pub fn snapshot(&mut self) {
+        self.undo_stack.push(self.rows.clone());
+        self.redo_stack.clear(); // Can't redo if you edit the past
+    }
+
+    pub fn undo(&mut self) -> bool {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.redo_stack.push(self.rows.clone());
+            self.rows = prev;
+            self.dirty = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn redo(&mut self) -> bool {
+        if let Some(next) = self.redo_stack.pop() {
+            self.undo_stack.push(self.rows.clone());
+            self.rows = next;
+            self.dirty = true;
+            return true;
+        }
+        false
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -34,7 +63,9 @@ impl Document {
         Ok(Self {
             rows,
             filename: Some(filename.to_string()),
-            dirty: false
+            dirty: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         })
     }
 

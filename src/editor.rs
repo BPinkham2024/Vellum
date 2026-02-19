@@ -109,6 +109,7 @@ impl Editor {
 
             // Enter insert mode
             KeyEvent { code: KeyCode::Char('i'), .. } => {
+                self.document.snapshot();
                 self.mode = Mode::Insert;
                 self.status_message = StatusMessage::from("Insert Mode".to_string());
             }
@@ -144,6 +145,18 @@ impl Editor {
                     self.status_message = StatusMessage::from("Error writing file!".to_string());
                 }
             }
+
+            KeyEvent { code: KeyCode::Char('u'), .. } => {
+                if self.document.undo() {
+                    self.status_message = StatusMessage::from("Undo".to_string());
+                }
+            }
+
+            KeyEvent { code: KeyCode::Char('r'), .. } => {
+                if self.document.redo() {
+                    self.status_message = StatusMessage::from("Redo".to_string());
+                }
+            }
             
             // Delegate movement logic
             KeyEvent {
@@ -168,9 +181,17 @@ impl Editor {
             // Typing logic (moved from process_normal_mode)
             // Handle Enter
             KeyEvent { code: KeyCode::Enter, .. } => {
+                self.document.snapshot();
                 self.document.insert(&self.cursor_position, '\n');
                 self.cursor_position.y += 1;
                 self.cursor_position.x = 0;
+            }
+
+            // Save state every space
+            KeyEvent { code: KeyCode::Char(' '), .. } => {
+                self.document.snapshot();
+                self.document.insert(&self.cursor_position, ' ');
+                self.cursor_position.x += 1;
             }
 
             // Handle Character insertion
@@ -235,6 +256,9 @@ impl Editor {
     }
 
     fn execute_command(&mut self, command: &str) -> Result<(), std::io::Error> {
+
+        // I want edits from commands to be able to be reversed/redone
+        self.document.snapshot();
 
         // Search and replace logic (vim syntax so all one word not split by whitespace)
         if command.starts_with("s/") {
