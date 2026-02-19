@@ -1,4 +1,4 @@
-# Vellum Text Editor
+# Vellum Text Editor (README out of date, focusing more on development rn)
 
 Vellum is a lightweight, terminal-based text editor written in Rust. It is designed to be a fast, modal editor specifically for writing Markdown notes. It features syntax highlighting, a command system similar to Vim, and zero-flicker rendering.
 
