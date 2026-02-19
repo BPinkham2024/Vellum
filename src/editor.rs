@@ -28,7 +28,8 @@ pub struct Editor {
     cursor_position: Position,
     document: Document,
     status_message: StatusMessage,
-    mode: Mode
+    mode: Mode,
+    show_line_numbers: bool,
 }
 
 struct StatusMessage {
@@ -72,6 +73,7 @@ impl Editor {
             document,
             status_message: StatusMessage::from(initial_status),
             mode: Mode::Normal,
+            show_line_numbers: true,
         }
     }
 
@@ -327,6 +329,10 @@ impl Editor {
                     let query = parts[1];
                     self.find_next(query);
                 }
+            },
+            "ln" => {
+                self.show_line_numbers = !self.show_line_numbers;
+                self.status_message = StatusMessage::from(format!("Line numbers: {}", self.show_line_numbers));
             }
             _ => self.status_message = StatusMessage::from(format!("Unknown command: {}", command)),
         }
@@ -464,6 +470,16 @@ impl Editor {
         self.cursor_position = Position { x, y };
     }
 
+    // Helper to calculate gutter width
+    fn gutter_width(&self) -> usize {
+        if !self.show_line_numbers {
+            return 0;
+        }
+
+        // Adds 2 for padding and pipe
+        self.document.len().to_string().len() + 2
+    }
+
     // Renders the TUI
     fn refresh_screen(&mut self) -> Result<(), std::io::Error> {
         // 1. Hide the cursor so it doesn't jump around while being drawn
@@ -481,9 +497,10 @@ impl Editor {
             self.draw_status_bar();
             self.draw_message_bar();
             
-            // 4. Put the cursor back where it belongs
+            // 4. Put the cursor back where it belongs and with offset
+            let offset = self.gutter_width() as u16;
             self.terminal.cursor_position(
-                self.cursor_position.x as u16, 
+                self.cursor_position.x as u16 + offset, 
                 self.cursor_position.y as u16
             );
         }
@@ -534,16 +551,33 @@ impl Editor {
     // Draws each row
     fn draw_rows(&mut self) {
         let height = self.terminal.size().height;
+        let width = self.terminal.size().width as usize;
+        let gutter = self.gutter_width();
         
         for terminal_row in 0..height  - 2 { // subtracting 2 allows for the status and message bar
             // Clear the line so old text doesn't linger
             self.terminal.clear_current_line();
 
+            let doc_row = terminal_row as usize;
+
+            // Draw line numbers
+            if self.show_line_numbers {
+                self.terminal.set_fg_color(Color::DarkGrey);
+                if doc_row < self.document.len() {
+                    let num_str = format!("{:>w$} |", doc_row + 1, w = gutter - 2);
+                    self.terminal.print(&num_str);
+                } else {
+                    let empty_str = format!("{:>w$} |", "~", w = gutter - 2);
+                    self.terminal.print(&empty_str);
+                }
+                self.terminal.reset_colors();
+            }
+
             // If the row exists in the document, render it
-            if let Some(row) = self.document.row(terminal_row as usize) {
+            if let Some(row) = self.document.row(doc_row) {
 
                 let start = 0;
-                let end = self.terminal.size().width as usize;
+                let end = width.saturating_sub(gutter);
                 let render_string = row.render(start, end);
 
                 for (i, c) in render_string.chars().enumerate() {
@@ -560,7 +594,7 @@ impl Editor {
                 self.terminal.reset_colors();
             } else if self.document.is_empty() && terminal_row == height / 3 {
                 self.draw_welcome_message();
-            } else {
+            } else if !self.show_line_numbers {
                 // ~ for empty lines, thank you vim
                 self.terminal.print("~");
             }
