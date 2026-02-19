@@ -66,16 +66,23 @@ impl Editor {
             Document::default()
         };
 
-        Self {
+        let mut editor = Self {
             should_quit: false,
             terminal: Terminal::default().expect("Failed to initialize terminal"),
             cursor_position: Position { x: 0, y: 0 },
             document,
-            status_message: StatusMessage::from(initial_status),
+            status_message: StatusMessage::from(initial_status.to_string()),
             mode: Mode::Normal,
             show_line_numbers: true,
             row_offset: 0,
-        }
+        };
+
+        editor.load_config();
+
+        // Reset startup message so it doesn't just show the last command from the config
+        editor.status_message = StatusMessage::from(initial_status);
+
+        editor
     }
 
     // The main loop
@@ -236,7 +243,7 @@ impl Editor {
             // Execute command
             KeyEvent { code: KeyCode::Enter, .. } => {
                 crate::commands::execute_command(self, &command)?;
-                
+
                 self.mode = Mode::Normal;
                 self.status_message = StatusMessage::from(String::new());
             }
@@ -382,6 +389,22 @@ impl Editor {
         }
     }
 
+    fn load_config(&mut self) {
+        if let Ok(home) = std::env::var("HOME") {
+            let config_path = format!("{}/.vellumrc", home);
+
+            if let Ok(contents) = std::fs::read_to_string(config_path) {
+                for line in contents.lines() {
+                    let cmd = line.trim();
+                    // Skip empty lines and comments
+                    if !cmd.is_empty() && !cmd.starts_with("#") {
+                        // Ignoring errors so bad configs don't crash the program
+                        let _ = crate::commands::execute_command(self, cmd);
+                    }
+                }
+            }
+        }
+    }
     
     // Updated to match terminal struct
     fn die(&mut self, e: &std::io::Error) {
