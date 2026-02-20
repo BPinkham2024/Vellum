@@ -156,12 +156,48 @@ impl Editor {
                 }
             }
 
+            // Copy (yank) current line
+            KeyEvent { code: KeyCode::Char('y'), .. } => {
+                if let Some(row) = self.document.row(self.cursor_position.y) {
+                    // Init clipboard and set text
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(row.string.clone());
+                        self.status_message = crate::editor::StatusMessage::from("Line copied!".to_string());
+                    } else {
+                        self.status_message = crate::editor::StatusMessage::from("Clipboard error".to_string());
+                    }
+                }
+            }
+
+            // Paste from clipboard
+            KeyEvent { code: KeyCode::Char('p'), .. } => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        self.document.snapshot(); // Snapshot to allow undo
+
+                        // Insert char by char to handle newlines
+                        for c in text.chars() {
+                            self.document.insert(&self.cursor_position, c);
+                            if c == '\n' {
+                                self.cursor_position.y += 1;
+                                self.cursor_position.x = 0;
+                            } else {
+                                self.cursor_position.x += 1;
+                            }
+                        }
+                        self.status_message = crate::editor::StatusMessage::from("Pasted!".to_string());
+                    }
+                }
+            }
+
+            // Undo to last snapshot
             KeyEvent { code: KeyCode::Char('u'), .. } => {
                 if self.document.undo() {
                     self.status_message = StatusMessage::from("Undo".to_string());
                 }
             }
 
+            // Redo to future snapshot in stack
             KeyEvent { code: KeyCode::Char('r'), .. } => {
                 if self.document.redo() {
                     self.status_message = StatusMessage::from("Redo".to_string());
