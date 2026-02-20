@@ -1,37 +1,61 @@
-use crate::row::Row;
+use ropey::Rope;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Error};
 use crate::editor::Position;
-use std::fs;
-use std::io::{Error, Write};
 
-#[derive(Default)]
 pub struct Document {
-    rows: Vec<Row>,
+    pub rope: Rope,
     pub filename: Option<String>,
     dirty: bool,
-    undo_stack: Vec<Vec<Row>>, // Past states
-    redo_stack: Vec<Vec<Row>>, // Future states
+    undo_stack: Vec<Rope>, // Past states
+    redo_stack: Vec<Rope>, // Future states
 }
 
-impl Document {
-    pub fn default() -> Self {
+impl Default for Document {
+    fn default() -> Self {
         Self {
-            rows: Vec::new(),
+            rope: Rope::new(),
             filename: None,
             dirty: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new()
         }
     }
+}
 
+impl Document {
+    pub fn open(filename: &str) -> Result<Self, Error> {
+        let file = File::open(filename)?;
+        let rope = Rope::from_reader(BufReader::new(file))?;
+
+        Ok(Self {
+            rope,
+            filename: Some(filename.to_string()),
+            dirty: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+        })
+    }
+    
+    pub fn save(&mut self) -> Result<(), Error> {
+        if let Some(filename) = &self.filename {
+            let file = File::create(filename)?;
+            self.rope.write_to(BufWriter::new(file))?;
+            self.dirty = false;
+        }
+        Ok(())
+    }
+
+    // Snapshotting
     pub fn snapshot(&mut self) {
-        self.undo_stack.push(self.rows.clone());
+        self.undo_stack.push(self.rope.clone());
         self.redo_stack.clear(); // Can't redo if you edit the past
     }
 
     pub fn undo(&mut self) -> bool {
         if let Some(prev) = self.undo_stack.pop() {
-            self.redo_stack.push(self.rows.clone());
-            self.rows = prev;
+            self.redo_stack.push(self.rope.clone());
+            self.rope = prev;
             self.dirty = true;
             return true;
         }
@@ -40,155 +64,54 @@ impl Document {
 
     pub fn redo(&mut self) -> bool {
         if let Some(next) = self.redo_stack.pop() {
-            self.undo_stack.push(self.rows.clone());
-            self.rows = next;
+            self.undo_stack.push(self.rope.clone());
+            self.rope = next;
             self.dirty = true;
             return true;
         }
         false
     }
 
+    // Info getters
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
 
-    pub fn open(filename: &str) -> Result<Self, std::io::Error> {
-        let contents = fs::read_to_string(filename)?;
-        let mut rows = Vec::new();
-
-        for value in contents.lines() {
-            rows.push(Row::from(value));
-        }
-
-        Ok(Self {
-            rows,
-            filename: Some(filename.to_string()),
-            dirty: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-        })
-    }
-
-    pub fn save(&mut self) -> Result<(), Error> {
-        if let Some(filename) = &self.filename {
-            let mut file = fs::File::create(filename)?;
-            for row in &self.rows {
-                file.write_all(row.as_bytes())?;
-                file.write_all(b"\n")?;
-            }
-            self.dirty = false;
-        }
-        Ok(())
-    }
-
-    pub fn row(&self, index: usize) -> Option<&Row> {
-        self.rows.get(index)
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
+        self.rope.len_chars() == 0
     }
 
     pub fn len(&self) -> usize {
-        self.rows.len()
+        self.rope.len_lines()
     }
 
+    // Helper to translate 2d cursor into 1d rope index
+    fn get_char_index(&self, at: &Position) -> usize {
+        let line_start = self.rope.line_to_char(at.y);
+        line_start + at.x
+    }
+
+    // Editing
     pub fn insert(&mut self, at: &Position, c: char) {
-        if at.y > self.len() {
-            return;
-        }
+        if at.y > self.len() { return; }
+        let char_idx = self.get_char_index(at);
+        self.rope.insert_char(char_idx, c);
         self.dirty = true;
-        
-        if c == '\n' {
-            self.insert_newline(at);
-            return;
-        }
-
-        if at.y == self.len() {
-            let mut row = Row::from("");
-            row.insert(0, c);
-            self.rows.push(row);
-        } else {
-            let row = self.rows.get_mut(at.y).unwrap();
-            row.insert(at.x, c);
-        }
     }
 
-    pub fn insert_at(&mut self, y: usize, x: usize, text: &str) {
-        if let Some(row) = self.rows.get_mut(y) {
-            row.insert_str(x, text);
-            self.dirty = true;
-        }
+    pub fn insert_str(&mut self, at: &Position, text: &str) {
+        if at.y >= self.len() { return; }
+        let char_idx = self.get_char_index(at);
+        self.rope.insert(char_idx, text);
+        self.dirty = true;
     }
 
     pub fn delete(&mut self, at: &Position) {
-        let len = self.len();
-        if at.y >= len {
-            return;
-        }
-        self.dirty = true;
-
-        if at.x == self.rows.get(at.y).unwrap().len() && at.y < len - 1 {
-            let next_row = self.rows.remove(at.y + 1);
-            let row = self.rows.get_mut(at.y).unwrap();
-            row.append(&next_row);
-        } else {
-            let row = self.rows.get_mut(at.y).unwrap();
-            row.delete(at.x);
-        }
-    }
-
-    pub fn replace(&mut self, target: &str, replacement: &str) -> usize {
-        let mut replaced_lines_count = 0;
-
-        for row in self.rows.iter_mut() {
-            if row.replace(target, replacement) {
-                replaced_lines_count += 1;
-            }
-        }
-
-        if replaced_lines_count > 0 {
+        let char_idx = self.get_char_index(at);
+        // Don't delete past end of file
+        if char_idx < self.rope.len_chars() {
+            self.rope.remove(char_idx..char_idx + 1);
             self.dirty = true;
         }
-
-        replaced_lines_count
     }
-
-    fn insert_newline(&mut self, at: &Position) {
-        if at.y > self.len() {
-            return;
-        }
-        
-        if at.y == self.len() {
-            self.rows.push(Row::from(""));
-        } else {
-            let current_row = self.rows.get_mut(at.y).unwrap();
-            let new_row = current_row.split(at.x);
-            self.rows.insert(at.y + 1, new_row);
-        }
-    }
-
-    // Header helper
-    pub fn set_header(&mut self, row_idx: usize, level: usize) {
-        if let Some(row) = self.rows.get_mut(row_idx) {
-            // Remove existing headings
-            let content = row.string.trim_start_matches('#').trim_start();
-            let hashes = "#".repeat(level);
-            row.string = format!("{} {}", hashes, content);
-            row.highlight();
-        }
-        self.dirty = true;
-    }
-
-    // Intending helper
-    pub fn indent(&mut self, row_idx: usize, count: usize) {
-        if let Some(row) = self.rows.get_mut(row_idx) {
-            let spaces = " ".repeat(count * 4);
-            row.string.insert_str(0, &spaces);
-            row.highlight();
-        }
-        self.dirty = true;
-        
-    }
-
 }
