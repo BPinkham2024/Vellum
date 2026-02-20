@@ -85,6 +85,18 @@ impl Editor {
         editor
     }
 
+    // Helper to get length of a line, ignoring newlines
+    pub(crate) fn line_length(&self, y: usize) -> usize {
+        if y >= self.document.len() { return 0; }
+        let line = self.document.rope.line(y);
+        let mut len = line.len_chars();
+
+        if line.chars().last() == Some('\n') { len = len.saturating_sub(1); }
+        if line.chars().nth(len.saturating_sub(1)) == Some('\r') { len = len.saturating_sub(1); }
+
+        len
+    }
+
     // The main loop
     // 1. Draw the UI
     // 2. Wait for a keypress
@@ -158,10 +170,11 @@ impl Editor {
 
             // Copy (yank) current line
             KeyEvent { code: KeyCode::Char('y'), .. } => {
-                if let Some(row) = self.document.row(self.cursor_position.y) {
+                if self.cursor_position.y < self.document.len() {
+                    let line = self.document.rope.line(self.cursor_position.y).to_string();
                     // Init clipboard and set text
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        let _ = clipboard.set_text(row.string.clone());
+                        let _ = clipboard.set_text(line);
                         self.status_message = crate::editor::StatusMessage::from("Line copied!".to_string());
                     } else {
                         self.status_message = crate::editor::StatusMessage::from("Clipboard error".to_string());
@@ -253,12 +266,11 @@ impl Editor {
                         self.cursor_position.x -= 1;
                         self.document.delete(&self.cursor_position);
                     } else {
-                        // Moving back a line (complex logic simplified for now)
-                        let previous_row_len = self.document.row(self.cursor_position.y - 1).unwrap().len();
+                        // Moving back a line
                         self.cursor_position.y -= 1;
-                        self.cursor_position.x = previous_row_len;
-                        self.document.delete(&self.cursor_position);
+                        self.cursor_position.x = self.line_length(self.cursor_position.y);
                     }
+                    self.document.delete(&self.cursor_position);
                 }
             }
             
@@ -318,47 +330,32 @@ impl Editor {
 
     // Simplifying cursor movement, takes in key code and translates to movement
     fn move_cursor(&mut self, key: KeyCode) {
-        let Position { mut x, mut y } = self.cursor_position;
-        // The limit is the number of rows in the document
-        let height = self.document.len();
-
-        // Allow the cursor to go to the very end of the line to continue typing
-        // Handles cases where row is empty
-        let width = if let Some(row) = self.document.row(y) {
-            row.len()
-        } else {
-            0
-        };
+        let y = self.cursor_position.y;
+        let current_len = self.line_length(y);
 
         match key {
-            KeyCode::Up | KeyCode::Char('w') => {
-                y = y.saturating_sub(1);
-            }
+            KeyCode::Up | KeyCode::Char('w') => self.cursor_position.y = self.cursor_position.y.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('s') => {
-                if y < height { 
-                    y = y.saturating_add(1); 
+                if self.cursor_position.y < self.document.len().saturating_sub(1) {
+                    self.cursor_position.y += 1;
                 }
             }
             KeyCode::Left | KeyCode::Char('a') => {
-                if x > 0 {
-                    x -= 1;
-                } else if y > 0 {
+                if self.cursor_position.x > 0 {
+                    self.cursor_position.x -= 1;
+                } else if self.cursor_position.y > 0 {
                     // Wrap to end of previous line
-                    y -= 1;
-                    if let Some(row) = self.document.row(y) {
-                        x = row.len();
-                    } else {
-                        x = 0;
-                    }
+                    self.cursor_position.y -= 1;
+                    self.cursor_position.x = self.line_length(self.cursor_position.y);
                 }
             },
             KeyCode::Right | KeyCode::Char('d') => {
-                if x < width {
-                    x += 1;
-                } else if y < height {
+                if self.cursor_position.x < current_len {
+                    self.cursor_position.x += 1;
+                } else if self.cursor_position.y < self.document.len().saturating_sub(1) {
                     // Wrap to start of next line
-                    y += 1;
-                    x = 0;
+                    self.cursor_position.y += 1;
+                    self.cursor_position.x = 0;
                 }
             }
             _ => (),
@@ -366,26 +363,10 @@ impl Editor {
 
 
         // Clamping
-        // 1. Vertical constraint: cannot go past last valid line
-        // Limiting y to the number of rows
-        if y > height {
-            y = height;
+        let new_len = self.line_length(self.cursor_position.y);
+        if self.cursor_position.x > new_len {
+            self.cursor_position.x = new_len;
         }
-
-        // 2. Horizontal constraint: cannot go past the last character in the line
-        // If moving vertically, x will be set to last index of line.
-        let new_row_len = if let Some(row) = self.document.row(y) {
-            row.len()
-        } else {
-            0
-        };
-
-        if x > new_row_len {
-            x = new_row_len;
-        }
-
-
-        self.cursor_position = Position { x, y };
     }
 
 
