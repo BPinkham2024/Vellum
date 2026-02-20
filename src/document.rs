@@ -114,4 +114,44 @@ impl Document {
             self.dirty = true;
         }
     }
+
+    // Comamnd helpers
+    pub fn replace(&mut self, target: &str, replacement: &str) -> usize {
+        // Convert to string, replace, and rebuild the rope
+        // Works for now but may get slow with larget files
+        let text = self.rope.to_string();
+        let count = text.matches(target).count();
+
+        if count > 0 {
+            let new_text = text.replace(target, replacement);
+            self.rope = ropey::Rope::from_str(&new_text);
+            self.dirty = true;
+        }
+        count
+    }
+
+    pub fn set_header(&mut self, y: usize, level: usize) {
+        if y >= self.len() { return; }
+
+        let line = self.rope.line(y).to_string();
+        let content = line.trim_start_matches("#").trim_start();
+        let hashes = "#".repeat(level);
+        let new_content = format!("{} {}", hashes, content);
+
+        let char_idx = self.rope.line_to_char(y);
+        let line_len = line.chars().count();
+
+        // Remove old line and insert the formatted one
+        self.rope.remove(char_idx..(char_idx + line_len));
+        self.rope.insert(char_idx, &new_content);
+        self.dirty = true;
+    }
+
+    pub fn indent(&mut self, y: usize, count: usize) {
+        if y > self.len() { return; }
+        let char_idx = self.rope.line_to_char(y);
+        let spaces = " ".repeat(count * 4);
+        self.rope.insert(char_idx, &spaces);
+        self.dirty = true;
+    }
 }

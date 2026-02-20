@@ -1,4 +1,4 @@
-use crate::editor::{Editor, StatusMessage};
+use crate::editor::{Editor, StatusMessage, Position};
 
 pub fn execute_command(editor: &mut Editor, command: &str) -> Result<(), std::io::Error> {
     // I want edits from commands to be able to be reversed/redone
@@ -17,7 +17,7 @@ pub fn execute_command(editor: &mut Editor, command: &str) -> Result<(), std::io
             editor.status_message = StatusMessage::from(format!("Replaced '{}' in {} lines", target, count));
 
             // Saftey clamp for cursor (pulls back to end of line)
-            let current_len = editor.document.row(editor.cursor_position.y).map_or(0, |r| r.len());
+            let current_len = editor.line_length(editor.cursor_position.y);
             if editor.cursor_position.x > current_len {
                 editor.cursor_position.x = current_len;
             }
@@ -27,7 +27,7 @@ pub fn execute_command(editor: &mut Editor, command: &str) -> Result<(), std::io
         return Ok(());
     }
 
-
+    // Standard commands
     let parts: Vec<&str> = command.split_whitespace().collect();
     if parts.is_empty() { return Ok(());}
 
@@ -62,7 +62,8 @@ pub fn execute_command(editor: &mut Editor, command: &str) -> Result<(), std::io
         "t" => {
             if parts.len() > 1 {
                 if let Ok(count) = parts[1].parse::<usize>() {
-                    indent_line(editor, count);
+                    editor.document.indent(editor.cursor_position.y, count);
+                    editor.cursor_position.x += count * 4;
                 }
             }
         },
@@ -88,18 +89,20 @@ fn wrap_word(editor: &mut Editor, wrapper: &str) {
     let y = editor.cursor_position.y;
     let x = editor.cursor_position.x;
 
-    if let Some(row) = editor.document.row(y) {
-        let line = &row.string;
+    if y < editor.document.len() {
+        let line = editor.document.rope.line(y).to_string();
 
         // Find start of word
         let start = line[..x].rfind(' ').map(|i| i + 1).unwrap_or(0);
         
         // Find end of word
-        let end = line[x..].find(' ').map(|i| x + i).unwrap_or(line.len());
+        let end = line[x..].find(' ').map(|i| x + i).unwrap_or_else(|| {
+            editor.line_length(y)
+        });
 
         // Since we are mutating the line, document needs to be called
-        editor.document.insert_at(y, end, wrapper); // Suffex first so we don't mess with indices for prefix insertion
-        editor.document.insert_at(y, start, wrapper);
+        editor.document.insert_str(&Position { x: end, y }, wrapper); // Suffex first so we don't mess with indices for prefix insertion
+        editor.document.insert_str(&Position { x: start, y }, wrapper);
 
         // Move cursor to end of word
         editor.cursor_position.x = end + (wrapper.len() * 2);
@@ -111,8 +114,9 @@ fn find_next(editor: &mut Editor, query: &str) {
     let mut y = start_y;
 
     loop {
-        if let Some(row) = editor.document.row(y) {
-            if let Some(x) = row.string.find(query) {
+        if y < editor.document.len() {
+            let line = editor.document.rope.line(y).to_string();
+            if let Some(x) = line.find(query) {
                 // Check if found after current cursor position only if cursor on y = stary_y
                 if y != start_y || x > editor.cursor_position.x {
                     editor.cursor_position.x = x;
@@ -134,9 +138,4 @@ fn find_next(editor: &mut Editor, query: &str) {
             return;
         }
     }
-}
-
-fn indent_line(editor: &mut Editor, count: usize) {
-    editor.document.indent(editor.cursor_position.y, count);
-    editor.cursor_position.x += count * 4;
 }
