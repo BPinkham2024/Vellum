@@ -1,6 +1,7 @@
 use crate::editor::{Editor, Mode};
 use crossterm::style::Color;
 use std::time::{Duration, Instant};
+use crate::row::Row;
 
 const WRAP_PREFIX: &str = " >"; // Visual indicator for wrapped text (will not show in saved files)
 
@@ -48,14 +49,21 @@ fn get_visual_cursor(editor: &mut Editor, text_width: usize) -> (u16, u16) {
 
     // Calc how many visual lines are taken up by rows above the cursor
     for doc_y in editor.row_offset..editor.cursor_position.y {
-        if let Some(row) = editor.document.row(doc_y) {
-            let len = row.len();
+        if doc_y < editor.document.len() {
+            let line_slice = editor.document.rope.line(doc_y);
+            let mut len = line_slice.len_chars();
+
+            // Ignore newline chars in len calc
+            if line_slice.chars().last() == Some('\n') { len = len.saturating_sub(1); }
+            if line_slice.chars().nth(len.saturating_sub(1)) == Some('\r') { len = len.saturating_sub(1); }
+
             if len <= text_width {
                 visual_y += 1;
             } else {
                 let remaining = len.saturating_sub(text_width);
                 let wrap_width = text_width.saturating_sub(WRAP_PREFIX.len());
-                let extra_lines = (remaining as f32 / std::cmp::max(1, wrap_width) as f32).ceil() as usize;
+                let safe_wrap_width = std::cmp::max(1, wrap_width);
+                let extra_lines = (remaining as f32 / safe_wrap_width as f32).ceil() as usize;
                 visual_y += 1 + extra_lines;
             }
         } else {
@@ -114,8 +122,16 @@ fn draw_rows(editor: &mut Editor) {
     let mut doc_row = editor.row_offset;
 
     while terminal_row < height - 2 && doc_row < editor.document.len() { // subtracting 2 allows for the status and message bar
-        if let Some(row) = editor.document.row(doc_row) {
-            let row_len = row.len();
+        if doc_row < editor.document.len() {
+            let line_slice = editor.document.rope.line(doc_row);
+            let mut line_str = line_slice.to_string();
+
+            // Ropey includes newline char at the end of a string (need to get rid of it)
+            if line_str.ends_with("\n") { line_str.pop(); }
+            if line_str.ends_with("\r") { line_str.pop(); }
+            
+            let row = Row::from(line_str.as_str());
+            let row_len = row.string.len();
             let mut char_index = 0;
             let mut is_wrapped = false;
 
@@ -137,7 +153,8 @@ fn draw_rows(editor: &mut Editor) {
                 };
 
                 let end_index = std::cmp::min(char_index + current_width, row_len);
-                let chunk = row.render(char_index, end_index);
+                // Substring helper, row.render is broken
+                let chunk = &row.string[char_index..end_index];
 
                 editor.terminal.clear_current_line();
                 draw_gutter(&mut editor.terminal, editor.show_line_numbers, gutter, doc_row, is_wrapped);
