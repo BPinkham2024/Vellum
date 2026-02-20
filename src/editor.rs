@@ -6,6 +6,8 @@ use std::{
     time::Instant
 };
 
+pub(crate) const WRAP_PREFIX: &str = " >"; // Visual indicator for wrapped text (will not show in saved files)
+
 // Cursor coordinates, non-negative
 pub struct Position {
     pub x: usize,
@@ -84,6 +86,17 @@ impl Editor {
 
         editor
     }
+
+    // Helper to calculate gutter width
+    pub(crate) fn gutter_width(&self) -> usize {
+        if !self.show_line_numbers {
+            return 0;
+        }
+
+        // Adds 2 for padding and pipe
+        self.document.len().to_string().len() + 2
+    }
+
 
     // Helper to get length of a line, ignoring newlines
     pub(crate) fn line_length(&self, y: usize) -> usize {
@@ -331,28 +344,81 @@ impl Editor {
     // Simplifying cursor movement, takes in key code and translates to movement
     fn move_cursor(&mut self, key: KeyCode) {
         let y = self.cursor_position.y;
+        let x = self.cursor_position.x;
         let current_len = self.line_length(y);
 
+        let term_width = self.terminal.size().width as usize;
+        let gutter = self.gutter_width();
+        let text_width = term_width.saturating_sub(gutter);
+        let p_len = WRAP_PREFIX.len();
+
+        // Prevent divide by zero if it somehow gets to that
+        let safe_wrap = std::cmp::max(1, text_width.saturating_sub(p_len));
+
+        // Figure out how many visual lines the current logical line takes up
+        let v_total = if current_len <= text_width { 1 } else { 2 + (current_len.saturating_sub(text_width)) / safe_wrap };
+        // Figure out while visual line the cursor is on
+        let v_current = if x < text_width { 0 } else { 1 + (x - text_width) / safe_wrap };
+
+        // Calc current visual screen column
+        let screen_col = if x < text_width { x } else { p_len + (x - text_width) % safe_wrap };
+
         match key {
-            KeyCode::Up | KeyCode::Char('w') => self.cursor_position.y = self.cursor_position.y.saturating_sub(1),
+            KeyCode::Up | KeyCode::Char('w') => {
+                if v_current > 0 {
+                    // Move up to the previous visual line in the same logical line
+                    if v_current == 1 {
+                        self.cursor_position.x = p_len + (x - text_width);
+                    } else {
+                        self.cursor_position.x = x.saturating_sub(safe_wrap);
+                    }
+                } else if y > 0 {
+                    // Move up to the previous logical line
+                    self.cursor_position.y -= 1;
+                    let l_prev = self.line_length(self.cursor_position.y);
+                    let v_total_prev = if l_prev <= text_width { 1 } else { 2 + (l_prev.saturating_sub(text_width + 1)) / safe_wrap};
+
+                    if v_total_prev == 1 {
+                        self.cursor_position.x = std::cmp::min(screen_col, l_prev);
+                    } else {
+                        let last_line_start = text_width + (v_total_prev - 2) * safe_wrap;
+                        let target_x = if screen_col < p_len {
+                            last_line_start
+                        } else {
+                            last_line_start + (screen_col - p_len)
+                        };
+                        self.cursor_position.x = std::cmp::min(target_x, l_prev);
+                    }
+                }
+            }
             KeyCode::Down | KeyCode::Char('s') => {
-                if self.cursor_position.y < self.document.len().saturating_sub(1) {
+                if v_current + 1 < v_total {
+                    // Move down to the next visual line in the same logical line
+                    let target_x = if v_current == 0 {
+                        if x < p_len { text_width } else { text_width + (x - p_len) }
+                    } else {
+                        x + safe_wrap
+                    };
+                    self.cursor_position.x = std::cmp::min(target_x, current_len);
+                } else if y < self.document.len().saturating_sub(1) {
+                    // Move down to next logical line
                     self.cursor_position.y += 1;
+                    self.cursor_position.x = std::cmp::min(screen_col, self.line_length(self.cursor_position.y));
                 }
             }
             KeyCode::Left | KeyCode::Char('a') => {
-                if self.cursor_position.x > 0 {
+                if x > 0 {
                     self.cursor_position.x -= 1;
-                } else if self.cursor_position.y > 0 {
+                } else if y > 0 {
                     // Wrap to end of previous line
                     self.cursor_position.y -= 1;
                     self.cursor_position.x = self.line_length(self.cursor_position.y);
                 }
             },
             KeyCode::Right | KeyCode::Char('d') => {
-                if self.cursor_position.x < current_len {
+                if x < current_len {
                     self.cursor_position.x += 1;
-                } else if self.cursor_position.y < self.document.len().saturating_sub(1) {
+                } else if y < self.document.len().saturating_sub(1) {
                     // Wrap to start of next line
                     self.cursor_position.y += 1;
                     self.cursor_position.x = 0;

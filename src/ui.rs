@@ -3,8 +3,6 @@ use crossterm::style::Color;
 use std::time::{Duration, Instant};
 use crate::row::Row;
 
-const WRAP_PREFIX: &str = " >"; // Visual indicator for wrapped text (will not show in saved files)
-
 // Renders the TUI
 pub fn refresh_screen(editor: &mut Editor) -> Result<(), std::io::Error> {
     editor.scroll();
@@ -25,7 +23,7 @@ pub fn refresh_screen(editor: &mut Editor) -> Result<(), std::io::Error> {
         draw_message_bar(editor);
         
         // 4. Put the cursor back where it belongs and with offset (updated)
-        let gutter = gutter_width(editor);
+        let gutter = editor.gutter_width();
         let text_width = (editor.terminal.size().width as usize).saturating_sub(gutter);
 
         let (visual_x, visual_y) = get_visual_cursor(editor, text_width);
@@ -61,7 +59,7 @@ fn get_visual_cursor(editor: &mut Editor, text_width: usize) -> (u16, u16) {
                 visual_y += 1;
             } else {
                 let remaining = len.saturating_sub(text_width);
-                let wrap_width = text_width.saturating_sub(WRAP_PREFIX.len());
+                let wrap_width = text_width.saturating_sub(crate::editor::WRAP_PREFIX.len());
                 let safe_wrap_width = std::cmp::max(1, wrap_width);
                 let extra_lines = (remaining as f32 / safe_wrap_width as f32).ceil() as usize;
                 visual_y += 1 + extra_lines;
@@ -75,27 +73,18 @@ fn get_visual_cursor(editor: &mut Editor, text_width: usize) -> (u16, u16) {
     let mut visual_x = editor.cursor_position.x;
     if visual_x >= text_width {
         let remaining_x = visual_x.saturating_sub(text_width);
-        let wrap_width = text_width.saturating_sub(WRAP_PREFIX.len());
+        let wrap_width = text_width.saturating_sub(crate::editor::WRAP_PREFIX.len());
         let safe_wrap_width = std::cmp::max(1, wrap_width);
 
         let extra_lines = remaining_x / safe_wrap_width;
 
         visual_y += extra_lines + 1; // Drop down for each wrap
-        visual_x = WRAP_PREFIX.len() + (remaining_x % safe_wrap_width); // Shift past the indicator
+        visual_x = crate::editor::WRAP_PREFIX.len() + (remaining_x % safe_wrap_width); // Shift past the indicator
     }
 
     (visual_x as u16, visual_y as u16)
 }
 
-// Helper to calculate gutter width
-fn gutter_width(editor: &mut Editor) -> usize {
-    if !editor.show_line_numbers {
-        return 0;
-    }
-
-    // Adds 2 for padding and pipe
-    editor.document.len().to_string().len() + 2
-}
 
 fn draw_gutter(terminal: &mut crate::terminal::Terminal, show_line_numbers: bool, gutter: usize, doc_row: usize, is_wrapped: bool) {
     if !show_line_numbers { return; }
@@ -115,7 +104,7 @@ fn draw_gutter(terminal: &mut crate::terminal::Terminal, show_line_numbers: bool
 fn draw_rows(editor: &mut Editor) {
     let height = editor.terminal.size().height as usize;
     let width = editor.terminal.size().width as usize;
-    let gutter = gutter_width(editor);
+    let gutter = editor.gutter_width();
     let text_width = width.saturating_sub(gutter);
 
     let mut terminal_row = 0;
@@ -147,7 +136,7 @@ fn draw_rows(editor: &mut Editor) {
             // Chunk text to fit screen
             while char_index < row_len && terminal_row < height - 2 {
                 let current_width = if is_wrapped {
-                    text_width.saturating_sub(WRAP_PREFIX.len())
+                    text_width.saturating_sub(crate::editor::WRAP_PREFIX.len())
                 } else {
                     text_width
                 };
@@ -162,7 +151,7 @@ fn draw_rows(editor: &mut Editor) {
 
                 if is_wrapped {
                     editor.terminal.set_fg_color(Color::DarkGrey);
-                    editor.terminal.print(WRAP_PREFIX);
+                    editor.terminal.print(crate::editor::WRAP_PREFIX);
                     editor.terminal.reset_colors();
                 }
 
