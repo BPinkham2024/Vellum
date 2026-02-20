@@ -1,4 +1,3 @@
-use std::cmp;
 use crate::highlighting::Type;
 
 #[derive(Clone)]
@@ -19,73 +18,6 @@ impl From<&str> for Row {
 }
 
 impl Row {
-    pub fn render(&self, start: usize, end: usize) -> String {
-        let end = cmp::min(end, self.string.len());
-        let start = cmp::min(start, end);
-        self.string.get(start..end).unwrap_or("").to_string()
-    }
-
-    pub fn len(&self) -> usize {
-        self.string.len()
-    }
-
-    pub fn insert_str(&mut self, at: usize, text: &str) {
-        if at >= self.len() {
-            self.string.push_str(text);
-        } else {
-            self.string.insert_str(at, text);
-        }
-
-        self.highlight();
-    }
-
-    pub fn insert(&mut self, at: usize, c: char) {
-        if at >= self.len() {
-            self.string.push(c);
-        } else {
-            self.string.insert(at, c);
-        }
-        self.highlight();
-    }
-
-    pub fn delete(&mut self, at: usize) {
-        if at < self.len() {
-            self.string.remove(at);
-        }
-        self.highlight();
-    }
-
-    pub fn append(&mut self, new: &Row) {
-        self.string = format!("{}{}", self.string, new.string);
-        self.highlight();
-    }
-
-    pub fn replace(&mut self, target: &str, replacement: &str) -> bool {
-        if self.string.contains(target) {
-            self.string = self.string.replace(target, replacement);
-            self.highlight();
-            return true;
-        }
-        false
-    }
-
-    pub fn split(&mut self, at: usize) -> Row {
-        let length = self.string.len();
-        
-        // Safety check to make sure there is no splitting past the end of the string
-        let split_index = std::cmp::min(at, length);
-        
-        // split_off keeps the first part in self.string and returns the second part
-        let remainder = self.string.split_off(split_index);
-        
-        self.highlight();
-        Row::from(remainder.as_str())
-    }
-    
-    pub fn as_bytes(&self) -> &[u8] {
-        self.string.as_bytes()
-    }
-
     pub fn highlight(&mut self) {
         let mut highlighting = Vec::new();
         let chars: Vec<char> = self.string.chars().collect();
