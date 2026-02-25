@@ -1,7 +1,6 @@
 use crate::editor::{Editor, Mode};
 use crossterm::style::Color;
 use std::time::{Duration, Instant};
-use crate::row::Row;
 
 // Renders the TUI
 pub fn refresh_screen(editor: &mut Editor) -> Result<(), std::io::Error> {
@@ -120,8 +119,8 @@ fn draw_rows(editor: &mut Editor) {
             if line_str.ends_with("\n") { line_str.pop(); }
             if line_str.ends_with("\r") { line_str.pop(); }
             
-            let row = Row::from(line_str.as_str());
-            let row_len = row.string.chars().count();
+            let highlights = editor.document.get_highlights(doc_row);
+            let row_len = line_str.chars().count();
             let mut char_index = 0;
             let mut is_wrapped = false;
 
@@ -144,7 +143,7 @@ fn draw_rows(editor: &mut Editor) {
 
                 let end_index = std::cmp::min(char_index + current_width, row_len);
                 // Substring helper, row.render is broken
-                let chunk = row.string.chars().skip(char_index).take(end_index - char_index).collect::<String>();
+                let chunk = line_str.chars().skip(char_index).take(end_index - char_index).collect::<String>();
 
                 editor.terminal.clear_current_line();
                 draw_gutter(&mut editor.terminal, editor.show_line_numbers, gutter, doc_row, is_wrapped);
@@ -158,11 +157,8 @@ fn draw_rows(editor: &mut Editor) {
 
                 // Render colored chars
                 for (i, c) in chunk.chars().enumerate() {
-                    if let Some(hl_type) = row.highlighting.get(char_index + i) {
-                        editor.terminal.set_fg_color(hl_type.to_color());
-                    } else {
-                        editor.terminal.set_fg_color(Color::Reset);
-                    }
+                    let hl_type = highlights.get(char_index + i).unwrap_or(&crate::highlighting::Type::None);
+                    editor.terminal.set_fg_color(hl_type.to_color());
                     editor.terminal.print(&c.to_string());
                 }
                 

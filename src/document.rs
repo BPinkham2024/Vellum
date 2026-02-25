@@ -2,6 +2,8 @@ use ropey::Rope;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Error};
 use crate::editor::Position;
+use crate::highlighting::Type;
+use tree_sitter::{Parser, Tree, Query, QueryCursor};
 
 pub struct Document {
     pub rope: Rope,
@@ -9,16 +11,38 @@ pub struct Document {
     dirty: bool,
     undo_stack: Vec<Rope>, // Past states
     redo_stack: Vec<Rope>, // Future states
+    pub parser: Parser,
+    pub tree: Option<Tree>,
+    pub query: Query,
+    pub source_string: String,
 }
 
 impl Default for Document {
     fn default() -> Self {
+        let mut parser = Parser::new();
+        // Set language to markdown
+        parser.set_language(tree_sitter_markdown::language()).expect("Failed to load markdown grammar");
+        let tree = parser.parse("", None);
+
+        let query = Query::new(
+            tree_sitter_markdown::language(),
+            "(atx_heading) @header
+            (strong_emphasis) @bold
+            (emphasis) @italic
+            (list_item) @list
+            (fenced_code_block) @string"
+        ).unwrap();
+
         Self {
             rope: Rope::new(),
             filename: None,
             dirty: false,
             undo_stack: Vec::new(),
-            redo_stack: Vec::new()
+            redo_stack: Vec::new(),
+            parser,
+            tree: tree,
+            query,
+            source_string: String::new(),
         }
     }
 }
@@ -28,12 +52,31 @@ impl Document {
         let file = File::open(filename)?;
         let rope = Rope::from_reader(BufReader::new(file))?;
 
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_markdown::language()).expect("Failed to load markdown grammar");
+        // Parse initial loaded file
+        let text = rope.to_string();
+        let tree = parser.parse(&text, None);
+
+        let query = Query::new(
+            tree_sitter_markdown::language(),
+            "(atx_heading) @header
+            (strong_emphasis) @bold
+            (emphasis) @italic
+            (list_item) @list
+            (fenced_code_block) @string"
+        ).unwrap();
+
         Ok(Self {
             rope,
             filename: Some(filename.to_string()),
             dirty: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            parser,
+            tree: tree,
+            query,
+            source_string: text,
         })
     }
     
@@ -52,11 +95,17 @@ impl Document {
         self.redo_stack.clear(); // Can't redo if you edit the past
     }
 
+    pub fn update_tree(&mut self) {
+        self.source_string = self.rope.to_string();
+        self.tree = self.parser.parse(&self.source_string, None);
+    }
+
     pub fn undo(&mut self) -> bool {
         if let Some(prev) = self.undo_stack.pop() {
             self.redo_stack.push(self.rope.clone());
             self.rope = prev;
             self.dirty = true;
+            self.update_tree();
             return true;
         }
         false
@@ -67,6 +116,7 @@ impl Document {
             self.undo_stack.push(self.rope.clone());
             self.rope = next;
             self.dirty = true;
+            self.update_tree();
             return true;
         }
         false
@@ -97,6 +147,7 @@ impl Document {
         let char_idx = self.get_char_index(at);
         self.rope.insert_char(char_idx, c);
         self.dirty = true;
+        self.update_tree();
     }
 
     pub fn insert_str(&mut self, at: &Position, text: &str) {
@@ -104,6 +155,7 @@ impl Document {
         let char_idx = self.get_char_index(at);
         self.rope.insert(char_idx, text);
         self.dirty = true;
+        self.update_tree();
     }
 
     pub fn delete(&mut self, at: &Position) {
@@ -112,6 +164,7 @@ impl Document {
         if char_idx < self.rope.len_chars() {
             self.rope.remove(char_idx..char_idx + 1);
             self.dirty = true;
+            self.update_tree();
         }
     }
 
@@ -126,6 +179,7 @@ impl Document {
             let new_text = text.replace(target, replacement);
             self.rope = ropey::Rope::from_str(&new_text);
             self.dirty = true;
+            self.update_tree();
         }
         count
     }
@@ -145,6 +199,7 @@ impl Document {
         self.rope.remove(char_idx..(char_idx + line_len));
         self.rope.insert(char_idx, &new_content);
         self.dirty = true;
+        self.update_tree();
     }
 
     pub fn indent(&mut self, y: usize, count: usize) {
@@ -153,5 +208,56 @@ impl Document {
         let spaces = " ".repeat(count * 4);
         self.rope.insert(char_idx, &spaces);
         self.dirty = true;
+        self.update_tree();
+    }
+
+    pub fn get_highlights(&self, y: usize) -> Vec<crate::highlighting::Type> {
+        let line = self.rope.line(y);
+        let mut colors =  vec![crate::highlighting::Type::None; line.len_chars()];
+
+        if let Some(tree) = &self.tree {
+            let start_byte = self.rope.line_to_byte(y);
+            let end_byte = start_byte + line.len_bytes();
+
+            let mut cursor = QueryCursor::new();
+            cursor.set_byte_range(start_byte, end_byte);
+
+            let text_bytes = self.source_string.as_bytes();
+            let matches = cursor.matches(
+                &self.query, 
+                tree.root_node(), 
+                |node: tree_sitter::Node| &text_bytes[node.byte_range()]
+            );
+            
+            for m in matches {
+                for capture in m.captures {
+                    let capture_name = self.query.capture_names()[capture.index as usize].as_str();
+                    let hl_type = match capture_name {
+                        "header" => Type::Header,
+                        "bold" => Type::Bold,
+                        "italic" => Type::Italic,
+                        "list" => Type::List,
+                        "string" => Type::String,
+                        _ => Type::None,
+                    };
+
+                    let node = capture.node;
+
+                    // Clamping ranges inside the line
+                    let n_start_byte = std::cmp::max(node.start_byte(), start_byte);
+                    let n_end_byte = std::cmp::min(node.end_byte(), end_byte);
+                    if n_start_byte >= n_end_byte { continue; }
+
+                    let start_char = self.rope.byte_to_char(n_start_byte).saturating_sub(self.rope.line_to_char(y));
+                    let end_char = self.rope.byte_to_char(n_end_byte).saturating_sub(self.rope.line_to_char(y));
+                    for i in start_char..end_char {
+                        if i < colors.len() {
+                            colors[i] = hl_type;
+                        }
+                    }
+                }
+            }
+        }
+        colors
     }
 }
