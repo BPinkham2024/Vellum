@@ -92,6 +92,9 @@ impl Document {
     // Snapshotting
     pub fn snapshot(&mut self) {
         self.undo_stack.push(self.rope.clone());
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0); // Limit undo history to 100
+        }
         self.redo_stack.clear(); // Can't redo if you edit the past
     }
 
