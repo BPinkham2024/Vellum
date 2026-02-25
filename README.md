@@ -1,91 +1,50 @@
-# Vellum Text Editor (README out of date, focusing more on development rn)
+# Vellum
 
-Vellum is a lightweight, terminal-based text editor written in Rust. It is designed to be a fast, modal editor specifically for writing Markdown notes. It features syntax highlighting, a command system similar to Vim, and zero-flicker rendering.
+Vellum is a fast, minimalist terminal text editor written in Rust. It's built to be lightweight and get out of your way, while still packing modern features under the hood.
 
 ## Features
 
-* **Zero-Flicker Rendering:** Uses double-buffering for smooth UI updates.
-* **Markdown Syntax Highlighting:**
-    * Headers (#, ##, ###)
-    * Lists (-, +, *, 1.)
-    * **Bold** and *Italic* text support
-* **Command System:** Vim-like command mode for complex operations.
-* **Smart Editing:**
-    * Auto-indentation aware
-    * Word wrapping helpers
-* **File I/O:** Open, Save, and "Save As" functionality.
-
-## Installation & Usage
-
-You must have [Rust and Cargo](https://rustup.rs/) installed.
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/BPinkham2024/vellum.git
-    cd vellum
-    ```
-
-2.  **Run the editor:**
-    ```bash
-    cargo run
-    ```
-
-3.  **Open a specific file:**
-    ```bash
-    cargo run notes.md
-    ```
+* **Rope Data Structure:** Powered by the `ropey` crate to handle massive files without breaking a sweat.
+* **Tree-Sitter Highlighting:** Real-time, structurally aware Markdown syntax highlighting.
+* **Smart Word Wrapping:** Visual word wrapping that correctly maps cursor movements so you don't skip over text.
+* **Modal Editing:** Built with Normal, Insert, and Command modes.
+* **Safe Undo/Redo:** Snapshot-based undo stack capped at 100 states so it doesn't eat your RAM.
 
 ## Keybindings
 
-### Navigation
-| Key | Action |
-| :--- | :--- |
-| `Arrows` | Move Cursor |
-| `Enter` | New Line |
-| `Backspace` | Delete Character |
+**Normal Mode**
+* `i` - Enter Insert Mode
+* `w` / `a` / `s` / `d` or Arrow Keys - Move cursor
+* `y` - Copy the current line to clipboard
+* `:` - Enter Command Mode
+* `Esc` - Return to Normal Mode
 
-### System Shortcuts
-| Key | Action |
-| :--- | :--- |
-| `Ctrl` + `Q` | Quit Vellum |
-| `Ctrl` + `S` | Save File |
-| `Ctrl` + `:` | **Enter Command Mode** |
+**Insert Mode**
+* Type to insert text.
+* `Esc` - Return to Normal Mode
 
----
+## Commands
 
-## Command Mode
+Type `:` in Normal Mode to open the command bar.
 
-Press `Ctrl` + `:` to enter Command Mode. The status bar will change to `COMMAND:`. Type your command and press `Enter`.
+* `w` - Save the file
+* `!w <filename>` - Save as a new file
+* `q` - Quit Vellum
+* `s/old/new` - Search and replace
+* `find <query>` - Jump to the next match
+* `ln` - Toggle line numbers
+* `head <level>` - Turn the current line into a Markdown header (e.g. `head 2` for `##`)
+* `bold` / `italic` - Wrap the current word in Markdown formatting
+* `t <count>` - Indent the current line by `<count>` spaces
+* `dd` - Delete the entire current line
+* `d <#>` - Delete `<#>` words forward (e.g. `d 3`)
+* `db <#>` - Delete `<#>` words backward
 
-### File Operations
-* `q` : Quit the editor.
-* `w` : Save the current file.
-* `!w <filename>` : Save the file as a new name (e.g., `!w homework.md`).
+## Installation
 
-### Formatting & Editing
-* `head <1-3>` : Converts the current line into a Header (e.g., `head 1` makes it H1).
-* `bold` : Wraps the word under the cursor in `**bold**` tags.
-* `italic` : Wraps the word under the cursor in `*italic*` tags.
-* `t <n>` : Indents the current line by `<n>` tabs.
-* `find <text>` : Jumps the cursor to the next occurrence of `<text>`.
+Clone the repository and build with Cargo:
 
-## Project Structure
-
-This project follows a modular MVC (Model-View-Controller) architecture:
-
-* **`src/main.rs`**: Entry point.
-* **`src/editor.rs` (Controller)**: Handles input loops, keypress logic, and mode switching.
-* **`src/terminal.rs` (View)**: Wraps `crossterm` to handle low-level terminal drawing and buffer flushing.
-* **`src/document.rs` (Model)**: Manages the file data, rows, and dirty state.
-* **`src/row.rs`**: Represents a single line of text and handles character logic.
-* **`src/highlighting.rs`**: The lexer/scanner that assigns colors to Markdown syntax.
-
-## Future Roadmap
-
-* [x] Search and Replace
-* [x] Line Number Rendering (Gutter)
-* [ ] Config file support (`.vellumrc`)
-* [x] Infinite scrolling
-* [ ] Mouse support
-* [ ] Markdown Rendering
-* [ ] Much more
+```bash
+git clone [https://github.com/bpinkham2024/vellum.git](https://github.com/bpinkham2024/vellum.git)
+cd vellum
+cargo build --release
