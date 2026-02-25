@@ -76,6 +76,26 @@ pub fn execute_command(editor: &mut Editor, command: &str) -> Result<(), std::io
         "ln" => {
             editor.show_line_numbers = !editor.show_line_numbers;
             editor.status_message = StatusMessage::from(format!("Line numbers: {}", editor.show_line_numbers));
+        },
+        "dd" => {
+            editor.document.delete_line(editor.cursor_position.y);
+
+            // Fix cursor if deleted bottom line
+            if editor.cursor_position.y >= editor.document.len() {
+                editor.cursor_position.y = editor.document.len().saturating_sub(1);
+            }
+            let current_len = editor.line_length(editor.cursor_position.y);
+            if editor.cursor_position.x > current_len {
+                editor.cursor_position.x = current_len;
+            }
+        },
+        "d" => {
+            let count = if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
+            delete_words(editor, count, true);
+        }
+        "db" => {
+            let count = if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
+            delete_words(editor, count, false);
         }
         _ => editor.status_message = StatusMessage::from(format!("Unknown command: {}", command)),
     }
@@ -153,4 +173,53 @@ fn find_next(editor: &mut Editor, query: &str) {
             return;
         }
     }
+}
+
+fn delete_words(editor: &mut Editor, count: usize, forward: bool) {
+    if count == 0 { return; }
+    let y = editor.cursor_position.y;
+    if y >= editor.document.len() { return; }
+
+    // Convert 2d cursor to 1d index
+    let cursor_idx = editor.document.rope.line_to_char(y) + editor.cursor_position.x;
+    let rope = &editor.document.rope;
+    let max_chars = rope.len_chars();
+    if cursor_idx >= max_chars { return; } 
+
+    let mut start_idx = cursor_idx;
+    let mut end_idx = cursor_idx;
+
+    // Find start of current word
+    while start_idx > 0 {
+        if rope.char(start_idx - 1).is_whitespace() { break; }
+        start_idx -= 1;
+    }
+
+    // Find end of current word
+    while end_idx < max_chars {
+        if rope.char(end_idx).is_whitespace() { break; }
+        end_idx += 1;
+    }
+
+    let mut words_left = count.saturating_add(1);
+
+    // Scan forward or backwards for additional words
+    if forward {
+        while words_left > 0 && end_idx < max_chars {
+            while end_idx < max_chars && rope.char(end_idx).is_whitespace() { end_idx += 1; }
+            while end_idx < max_chars && !rope.char(end_idx).is_whitespace() { end_idx += 1; }
+            words_left -= 1;
+        }
+    } else {
+        while words_left > 0 && start_idx > 0 {
+            while start_idx > 0 && rope.char(start_idx - 1).is_whitespace() { start_idx -= 1; }
+            while start_idx > 0 && rope.char(start_idx - 1).is_whitespace() { start_idx -= 1; }
+            words_left -= 1;
+        }
+    }
+
+    // Nuke range and move cursor back
+    editor.document.delete_char_range(start_idx, end_idx);
+    editor.cursor_position.y = editor.document.rope.char_to_line(start_idx);
+    editor.cursor_position.x = start_idx - editor.document.rope.line_to_char(editor.cursor_position.y);
 }

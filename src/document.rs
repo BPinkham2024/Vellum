@@ -171,6 +171,29 @@ impl Document {
         }
     }
 
+    pub fn delete_line(&mut self, y: usize) {
+        if y < self.len() {
+            let start_char = self.rope.line_to_char(y);
+            let end_char = if y + 1 < self.len() {
+                self.rope.line_to_char(y + 1)
+            } else {
+                self.rope.len_chars()
+            };
+            self.rope.remove(start_char..end_char);
+            self.dirty = true;
+            self.update_tree();
+        }
+    }
+
+    pub fn delete_char_range(&mut self, start: usize, end: usize) {
+        if start < end && start <= self.rope.len_chars() {
+            let actual_end = std::cmp::min(end, self.rope.len_chars());
+            self.rope.remove(start..actual_end);
+            self.dirty = true;
+            self.update_tree();
+        }
+    }
+
     // Comamnd helpers
     pub fn replace(&mut self, target: &str, replacement: &str) -> usize {
         // Convert to string, replace, and rebuild the rope
