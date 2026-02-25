@@ -31,7 +31,7 @@ impl Row {
 
         // Headers
         if self.string.starts_with("#") {
-            for i in 0..self.string.len() {
+            for i in 0..chars.len() {
                 highlighting[i] = Type::Header;
             }
         }

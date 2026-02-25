@@ -277,7 +277,6 @@ impl Editor {
                 if self.cursor_position.x > 0 || self.cursor_position.y > 0 {
                     if self.cursor_position.x > 0 {
                         self.cursor_position.x -= 1;
-                        self.document.delete(&self.cursor_position);
                     } else {
                         // Moving back a line
                         self.cursor_position.y -= 1;
@@ -328,15 +327,16 @@ impl Editor {
     }
 
     pub fn scroll(&mut self) {
-        let terminal_height = self.terminal.size().height as usize - 2; // -2 for the status bar
+        let terminal_height = self.terminal.size().height as usize;
+        let visible_height = terminal_height.saturating_sub(2);
 
         // Move offset up if cursor goes above visible screen
         if self.cursor_position.y < self.row_offset {
             self.row_offset = self.cursor_position.y;
         }
         // Move offset down if cursor goes below visible screen
-        else if self.cursor_position.y >= self.row_offset + terminal_height {
-            self.row_offset = self.cursor_position.y - terminal_height + 1;
+        else if self.cursor_position.y >= self.row_offset + visible_height {
+            self.row_offset = self.cursor_position.y.saturating_sub(visible_height).saturating_add(1);
         }
     }
 

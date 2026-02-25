@@ -103,6 +103,7 @@ fn draw_gutter(terminal: &mut crate::terminal::Terminal, show_line_numbers: bool
 // Draws each row
 fn draw_rows(editor: &mut Editor) {
     let height = editor.terminal.size().height as usize;
+    let visible_height = height.saturating_sub(2);
     let width = editor.terminal.size().width as usize;
     let gutter = editor.gutter_width();
     let text_width = width.saturating_sub(gutter);
@@ -110,7 +111,7 @@ fn draw_rows(editor: &mut Editor) {
     let mut terminal_row = 0;
     let mut doc_row = editor.row_offset;
 
-    while terminal_row < height - 2 && doc_row < editor.document.len() { // subtracting 2 allows for the status and message bar
+    while terminal_row < visible_height && doc_row < editor.document.len() { // subtracting 2 allows for the status and message bar
         if doc_row < editor.document.len() {
             let line_slice = editor.document.rope.line(doc_row);
             let mut line_str = line_slice.to_string();
@@ -120,7 +121,7 @@ fn draw_rows(editor: &mut Editor) {
             if line_str.ends_with("\r") { line_str.pop(); }
             
             let row = Row::from(line_str.as_str());
-            let row_len = row.string.len();
+            let row_len = row.string.chars().count();
             let mut char_index = 0;
             let mut is_wrapped = false;
 
@@ -134,7 +135,7 @@ fn draw_rows(editor: &mut Editor) {
             }
 
             // Chunk text to fit screen
-            while char_index < row_len && terminal_row < height - 2 {
+            while char_index < row_len && terminal_row < visible_height {
                 let current_width = if is_wrapped {
                     text_width.saturating_sub(crate::editor::WRAP_PREFIX.len())
                 } else {
@@ -143,7 +144,7 @@ fn draw_rows(editor: &mut Editor) {
 
                 let end_index = std::cmp::min(char_index + current_width, row_len);
                 // Substring helper, row.render is broken
-                let chunk = &row.string[char_index..end_index];
+                let chunk = row.string.chars().skip(char_index).take(end_index - char_index).collect::<String>();
 
                 editor.terminal.clear_current_line();
                 draw_gutter(&mut editor.terminal, editor.show_line_numbers, gutter, doc_row, is_wrapped);
@@ -177,7 +178,7 @@ fn draw_rows(editor: &mut Editor) {
     }
 
     // Fill empty screen with ~, thank you vim
-    while terminal_row < height - 2 {
+    while terminal_row < visible_height {
         editor.terminal.clear_current_line();
         if editor.show_line_numbers {
             let empty_str = format!("{:>w$} |", "~", w = gutter.saturating_sub(2));

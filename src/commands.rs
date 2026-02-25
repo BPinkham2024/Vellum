@@ -91,14 +91,25 @@ fn wrap_word(editor: &mut Editor, wrapper: &str) {
 
     if y < editor.document.len() {
         let line = editor.document.rope.line(y).to_string();
+        let chars: Vec<char> = line.chars().collect();
 
         // Find start of word
-        let start = line[..x].rfind(' ').map(|i| i + 1).unwrap_or(0);
+        let mut start = 0;
+        for i in (0..x).rev() {
+            if i < chars.len() && chars[i] == ' ' {
+                start = i + 1;
+                break;
+            }
+        }
         
         // Find end of word
-        let end = line[x..].find(' ').map(|i| x + i).unwrap_or_else(|| {
-            editor.line_length(y)
-        });
+        let mut end = chars.len();
+        for i in x..chars.len() {
+            if chars[i] == ' ' {
+                end = i;
+                break;
+            }
+        }
 
         // Since we are mutating the line, document needs to be called
         editor.document.insert_str(&Position { x: end, y }, wrapper); // Suffex first so we don't mess with indices for prefix insertion
@@ -116,10 +127,14 @@ fn find_next(editor: &mut Editor, query: &str) {
     loop {
         if y < editor.document.len() {
             let line = editor.document.rope.line(y).to_string();
-            if let Some(x) = line.find(query) {
+            if let Some(byte_idx) = line.find(query) {
+
+                // Convert byte index to char index
+                let char_idx = line[..byte_idx].chars().count();
+
                 // Check if found after current cursor position only if cursor on y = stary_y
-                if y != start_y || x > editor.cursor_position.x {
-                    editor.cursor_position.x = x;
+                if y != start_y || char_idx > editor.cursor_position.x {
+                    editor.cursor_position.x = char_idx;
                     editor.cursor_position.y = y;
                     editor.status_message = StatusMessage::from(format!("Found: {}", query));
                     return;
