@@ -45,6 +45,6 @@ Type `:` in Normal Mode to open the command bar.
 Clone the repository and build with Cargo:
 
 ```bash
-git clone [https://github.com/bpinkham2024/vellum.git](https://github.com/bpinkham2024/vellum.git)
+git clone https://github.com/bpinkham2024/vellum.git
 cd vellum
 cargo build --release
